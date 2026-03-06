@@ -473,66 +473,17 @@ export function GenerateImageNode({ id, data, selected }: NodeProps<NanoBananaNo
       headerAction={headerAction}
       titlePrefix={titlePrefix}
       commentNavigation={commentNavigation ?? undefined}
+      handles={
+        <>
+          <Handle type="target" position={Position.Left} id="image" style={{ top: "35%" }} data-handletype="image" isConnectable={true} />
+          <div className="absolute text-[10px] font-medium whitespace-nowrap pointer-events-none text-right" style={{ right: `calc(100% + 8px)`, top: "calc(35% - 18px)", color: "var(--handle-color-image)" }}>Image</div>
+          <Handle type="target" position={Position.Left} id="text" style={{ top: "65%" }} data-handletype="text" isConnectable={true} />
+          <div className="absolute text-[10px] font-medium whitespace-nowrap pointer-events-none text-right" style={{ right: `calc(100% + 8px)`, top: "calc(65% - 18px)", color: "var(--handle-color-text)" }}>Prompt</div>
+          <Handle type="source" position={Position.Right} id="image" style={{ top: "50%" }} data-handletype="image" />
+          <div className="absolute text-[10px] font-medium whitespace-nowrap pointer-events-none" style={{ left: `calc(100% + 8px)`, top: "calc(50% - 18px)", color: "var(--handle-color-image)" }}>Image</div>
+        </>
+      }
     >
-      {/* Input handles - ALWAYS use same IDs and positions for connection stability */}
-      {/* Image input at 35%, Text input at 65% - never changes regardless of model */}
-      <Handle
-        type="target"
-        position={Position.Left}
-        id="image"
-        style={{ top: "35%" }}
-        data-handletype="image"
-        isConnectable={true}
-      />
-      {/* Image label */}
-      <div
-        className="absolute text-[10px] font-medium whitespace-nowrap pointer-events-none text-right"
-        style={{
-          right: `calc(100% + 8px)`,
-          top: "calc(35% - 18px)",
-          color: "var(--handle-color-image)",
-        }}
-      >
-        Image
-      </div>
-      <Handle
-        type="target"
-        position={Position.Left}
-        id="text"
-        style={{ top: "65%" }}
-        data-handletype="text"
-        isConnectable={true}
-      />
-      {/* Prompt label */}
-      <div
-        className="absolute text-[10px] font-medium whitespace-nowrap pointer-events-none text-right"
-        style={{
-          right: `calc(100% + 8px)`,
-          top: "calc(65% - 18px)",
-          color: "var(--handle-color-text)",
-        }}
-      >
-        Prompt
-      </div>
-      {/* Output handle */}
-      <Handle
-        type="source"
-        position={Position.Right}
-        id="image"
-        style={{ top: "50%" }}
-        data-handletype="image"
-      />
-      {/* Output label */}
-      <div
-        className="absolute text-[10px] font-medium whitespace-nowrap pointer-events-none"
-        style={{
-          left: `calc(100% + 8px)`,
-          top: "calc(50% - 18px)",
-          color: "var(--handle-color-image)",
-        }}
-      >
-        Image
-      </div>
 
       <div className="flex-1 flex flex-col min-h-0 gap-2">
         {/* Preview area */}
