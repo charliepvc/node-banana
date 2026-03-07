@@ -484,8 +484,6 @@ export function GenerateVideoNode({ id, data, selected }: NodeProps<GenerateVide
                     isPlaceholder: false,
                   });
                 });
-              } else {
-                handles.push({ id: "image", type: "image", label: "Image", schemaName: null, description: "Not used by this model", isPlaceholder: true });
               }
 
               if (hasTextInput) {
@@ -499,8 +497,6 @@ export function GenerateVideoNode({ id, data, selected }: NodeProps<GenerateVide
                     isPlaceholder: false,
                   });
                 });
-              } else {
-                handles.push({ id: "text", type: "text", label: "Prompt", schemaName: null, description: "Not used by this model", isPlaceholder: true });
               }
 
               const imageHandles = handles.filter(h => h.type === "image");
@@ -552,15 +548,15 @@ export function GenerateVideoNode({ id, data, selected }: NodeProps<GenerateVide
             })()
           ) : (
             <>
-              <Handle type="target" position={Position.Left} id="image" style={{ top: "35%" }} data-handletype="image" isConnectable={true} />
+              <Handle type="target" position={Position.Left} id="image" style={{ top: "35%", pointerEvents: "auto" }} data-handletype="image" isConnectable={true} />
               <div className="absolute text-[10px] font-medium whitespace-nowrap pointer-events-none text-right" style={{ right: `calc(100% + 8px)`, top: "calc(35% - 18px)", color: "var(--handle-color-image)" }}>Image</div>
-              <Handle type="target" position={Position.Left} id="text" style={{ top: "65%" }} data-handletype="text" isConnectable={true} />
+              <Handle type="target" position={Position.Left} id="text" style={{ top: "65%", pointerEvents: "auto" }} data-handletype="text" isConnectable={true} />
               <div className="absolute text-[10px] font-medium whitespace-nowrap pointer-events-none text-right" style={{ right: `calc(100% + 8px)`, top: "calc(65% - 18px)", color: "var(--handle-color-text)" }}>Prompt</div>
             </>
           )}
 
           {/* Video output handle */}
-          <Handle type="source" position={Position.Right} id="video" style={{ top: "50%" }} data-handletype="video" />
+          <Handle type="source" position={Position.Right} id="video" style={{ top: "50%", pointerEvents: "auto" }} data-handletype="video" />
           <div className="absolute text-[10px] font-medium whitespace-nowrap pointer-events-none" style={{ left: `calc(100% + 8px)`, top: "calc(50% - 18px)", color: "var(--handle-color-image)" }}>Video</div>
         </>
       }

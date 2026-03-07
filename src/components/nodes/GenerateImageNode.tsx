@@ -475,11 +475,11 @@ export function GenerateImageNode({ id, data, selected }: NodeProps<NanoBananaNo
       commentNavigation={commentNavigation ?? undefined}
       handles={
         <>
-          <Handle type="target" position={Position.Left} id="image" style={{ top: "35%" }} data-handletype="image" isConnectable={true} />
+          <Handle type="target" position={Position.Left} id="image" style={{ top: "35%", pointerEvents: "auto" }} data-handletype="image" isConnectable={true} />
           <div className="absolute text-[10px] font-medium whitespace-nowrap pointer-events-none text-right" style={{ right: `calc(100% + 8px)`, top: "calc(35% - 18px)", color: "var(--handle-color-image)" }}>Image</div>
-          <Handle type="target" position={Position.Left} id="text" style={{ top: "65%" }} data-handletype="text" isConnectable={true} />
+          <Handle type="target" position={Position.Left} id="text" style={{ top: "65%", pointerEvents: "auto" }} data-handletype="text" isConnectable={true} />
           <div className="absolute text-[10px] font-medium whitespace-nowrap pointer-events-none text-right" style={{ right: `calc(100% + 8px)`, top: "calc(65% - 18px)", color: "var(--handle-color-text)" }}>Prompt</div>
-          <Handle type="source" position={Position.Right} id="image" style={{ top: "50%" }} data-handletype="image" />
+          <Handle type="source" position={Position.Right} id="image" style={{ top: "50%", pointerEvents: "auto" }} data-handletype="image" />
           <div className="absolute text-[10px] font-medium whitespace-nowrap pointer-events-none" style={{ left: `calc(100% + 8px)`, top: "calc(50% - 18px)", color: "var(--handle-color-image)" }}>Image</div>
         </>
       }

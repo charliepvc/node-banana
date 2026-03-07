@@ -294,7 +294,15 @@ export function getConnectedInputsPure(
         const stringValue = typeof value === "string" ? value : String(value);
 
         // Normalize handleId: if it's the primary handle for prompt, set the root 'text'
-        const isPrimaryText = !handleId || handleId === "text" || handleId === "text-0" || handleId === "prompt";
+        let isPrimaryText = !handleId || handleId === "text" || handleId === "text-0" || handleId === "prompt";
+        if (inputSchema && inputSchema.length > 0) {
+          const textInputs = inputSchema.filter((i) => i.type === "text");
+          if (textInputs.length > 0 && handleId) {
+            const schemaName = handleToSchemaName[handleId];
+            isPrimaryText = schemaName === textInputs[0].name;
+          }
+        }
+
         if (isPrimaryText) {
           text = stringValue;
         }
