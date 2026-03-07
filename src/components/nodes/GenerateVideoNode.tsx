@@ -594,7 +594,7 @@ export function GenerateVideoNode({ id, data, selected }: NodeProps<GenerateVide
 
           {/* Video output handle */}
           <Handle type="source" position={Position.Right} id="video" style={{ top: "50%", pointerEvents: "auto" }} data-handletype="video" />
-          <div className="absolute text-[10px] font-medium whitespace-nowrap pointer-events-none" style={{ left: `calc(100% + 8px)`, top: "calc(50% - 18px)", color: "var(--handle-color-image)" }}>Video</div>
+          <div className="absolute text-[10px] font-medium whitespace-nowrap pointer-events-none" style={{ left: `calc(100% + 8px)`, top: "calc(50% - 18px)", color: "var(--handle-color-video, var(--handle-color-image))" }}>Video</div>
         </>
       }
     >
