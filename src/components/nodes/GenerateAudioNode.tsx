@@ -212,15 +212,18 @@ export function GenerateAudioNode({ id, data, selected }: NodeProps<GenerateAudi
 
     let textCount = 0;
     let imageCount = 0;
+    let audioCount = 0;
 
     return nodeData.inputSchema.map((input, index) => {
-      const isImage = input.type === "image";
-      const handleType = isImage ? "image" : "text";
+      const handleType = input.type === "image" || input.type === "audio" ? input.type : "text";
       
       let handleId = "";
-      if (isImage) {
+      if (handleType === "image") {
         handleId = imageCount === 0 ? "image" : `image-${imageCount}`;
         imageCount++;
+      } else if (handleType === "audio") {
+        handleId = audioCount === 0 ? "audio" : `audio-${audioCount}`;
+        audioCount++;
       } else {
         handleId = textCount === 0 ? "text" : `text-${textCount}`;
         textCount++;
@@ -235,7 +238,7 @@ export function GenerateAudioNode({ id, data, selected }: NodeProps<GenerateAudi
           data-handletype={handleType}
           data-schema-name={input.name}
           style={{
-            background: handleType === "image" ? "rgb(34, 197, 94)" : "rgb(251, 191, 36)",
+            background: handleType === "image" ? "rgb(34, 197, 94)" : handleType === "audio" ? "rgb(167, 139, 250)" : "rgb(251, 191, 36)",
             top: `${50 + (index - nodeData.inputSchema!.length / 2 + 0.5) * 20}px`,
           }}
           title={input.label}

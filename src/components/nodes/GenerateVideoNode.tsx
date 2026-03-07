@@ -14,6 +14,7 @@ import { useToast } from "@/components/Toast";
 import { getVideoDimensions, calculateNodeSizePreservingHeight } from "@/utils/nodeDimensions";
 import { ProviderBadge } from "./ProviderBadge";
 import { useVideoBlobUrl } from "@/hooks/useVideoBlobUrl";
+import { isVeoModel, getVeoMetadata } from "@/utils/veoUtils";
 
 // Video generation capabilities
 const VIDEO_CAPABILITIES: ModelCapability[] = ["text-to-video", "image-to-video"];
@@ -23,39 +24,21 @@ const VEO_ASPECT_RATIOS = ["16:9", "9:16"] as const;
 const VEO_DURATIONS = ["4", "6", "8"] as const;
 const VEO_RESOLUTIONS = ["720p", "1080p", "4k"] as const;
 
-/** Returns true for Gemini-native or Google Veo models */
-/**
- * Checks if a model ID corresponds to a Google Veo model.
- * @param modelId - The model ID to check.
- * @returns True if the model is a Veo model.
- */
-function isVeoModel(modelId: string | undefined): boolean {
-  if (!modelId) return false;
-  const id = modelId.toLowerCase();
-  // Support both native Gemini IDs ("veo-") and Kie IDs ("veo3/") or others containing "veo"
-  return id.startsWith("veo-") || id.startsWith("veo3/") || id.includes("/veo");
-}
-
-/** Build the hardcoded inputSchema for a Veo model, or undefined for non-Veo */
 /**
  * Builds a hardcoded input schema for Veo models.
  * @param modelId - The model ID to build the schema for.
  * @returns Array of input definitions or undefined if not a Veo model.
  */
 function buildVeoInputSchema(modelId: string): ModelInputDef[] | undefined {
-  if (!isVeoModel(modelId)) return undefined;
-  
-  const id = modelId.toLowerCase();
-  const isI2V = id.includes("image-to-video") || id.includes("i2v") || id.includes("image to video");
-  // Kie models use 'imageUrls', native Gemini models use 'image'
-  const imageParamName = id.startsWith("veo3") ? "imageUrls" : "image";
+  const metadata = getVeoMetadata(modelId);
+  if (!metadata.isVeo) return undefined;
   
   const schema: ModelInputDef[] = [];
   
   // Only include image for Image-to-Video models
-  if (isI2V) {
+  if (metadata.isI2V) {
     schema.push({ 
-      name: imageParamName, 
+      name: metadata.imageParamName, 
       type: "image", 
       required: true, 
       label: "Image",
@@ -274,8 +257,11 @@ export function GenerateVideoNode({ id, data, selected }: NodeProps<GenerateVide
             : node
         )
       );
+
+      // Recompute React Flow hitboxes immediately after height change
+      requestAnimationFrame(() => updateNodeInternals(id));
     },
-    [id, setNodes]
+    [id, setNodes, updateNodeInternals]
   );
   
   // Migrate existing/legacy Veo nodes to use the new stable schema automatically
@@ -471,9 +457,12 @@ export function GenerateVideoNode({ id, data, selected }: NodeProps<GenerateVide
             return { ...node, style: { ...node.style, width: newSize.width, height: newSize.height } };
           })
         );
+
+        // Recompute React Flow hitboxes immediately after auto-resize
+        requestAnimationFrame(() => updateNodeInternals(id));
       });
     });
-  }, [id, nodeData.outputVideo, setNodes]);
+  }, [id, nodeData.outputVideo, setNodes, updateNodeInternals]);
 
   return (
     <>
