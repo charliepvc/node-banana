@@ -24,6 +24,11 @@ const VEO_DURATIONS = ["4", "6", "8"] as const;
 const VEO_RESOLUTIONS = ["720p", "1080p", "4k"] as const;
 
 /** Returns true for Gemini-native or Google Veo models */
+/**
+ * Checks if a model ID corresponds to a Google Veo model.
+ * @param modelId - The model ID to check.
+ * @returns True if the model is a Veo model.
+ */
 function isVeoModel(modelId: string | undefined): boolean {
   if (!modelId) return false;
   const id = modelId.toLowerCase();
@@ -32,11 +37,16 @@ function isVeoModel(modelId: string | undefined): boolean {
 }
 
 /** Build the hardcoded inputSchema for a Veo model, or undefined for non-Veo */
+/**
+ * Builds a hardcoded input schema for Veo models.
+ * @param modelId - The model ID to build the schema for.
+ * @returns Array of input definitions or undefined if not a Veo model.
+ */
 function buildVeoInputSchema(modelId: string): ModelInputDef[] | undefined {
   if (!isVeoModel(modelId)) return undefined;
   
   const id = modelId.toLowerCase();
-  const isI2V = id.includes("image-to-video");
+  const isI2V = id.includes("image-to-video") || id.includes("i2v") || id.includes("image to video");
   // Kie models use 'imageUrls', native Gemini models use 'image'
   const imageParamName = id.startsWith("veo3") ? "imageUrls" : "image";
   
@@ -75,6 +85,12 @@ function buildVeoInputSchema(modelId: string): ModelInputDef[] | undefined {
 
 type GenerateVideoNodeType = Node<GenerateVideoNodeData, "generateVideo">;
 
+/**
+ * GenerateVideoNode component for AI video generation.
+ * Supports Google Veo and other external video models.
+ * @param props - Node properties from React Flow.
+ * @returns React component for the video generation node.
+ */
 export function GenerateVideoNode({ id, data, selected }: NodeProps<GenerateVideoNodeType>) {
   const nodeData = data;
   const commentNavigation = useCommentNavigation(id);
@@ -113,6 +129,10 @@ export function GenerateVideoNode({ id, data, selected }: NodeProps<GenerateVide
   }, [geminiApiKey, replicateEnabled, replicateApiKey, kieEnabled, kieApiKey]);
 
   // Fetch models from external providers when provider changes
+  /**
+   * Fetches available video models from the selected provider.
+   * @returns A promise resolving when models are loaded.
+   */
   const fetchModels = useCallback(async () => {
     setIsLoadingModels(true);
     setModelsFetchError(null);
@@ -210,6 +230,11 @@ export function GenerateVideoNode({ id, data, selected }: NodeProps<GenerateVide
   );
 
   // Update a single key in the parameters bag (used by hardcoded Veo controls)
+  /**
+   * Updates a specific parameter for Veo models.
+   * @param key - The parameter key to update.
+   * @param value - The new value for the parameter.
+   */
   const updateVeoParam = useCallback(
     (key: string, value: unknown) => {
       const current = nodeData.parameters || {};
@@ -276,11 +301,19 @@ export function GenerateVideoNode({ id, data, selected }: NodeProps<GenerateVide
   const regenerateNode = useWorkflowStore((state) => state.regenerateNode);
   const isRunning = useWorkflowStore((state) => state.isRunning);
 
+  /**
+   * Triggers the regeneration of the current node's video.
+   */
   const handleRegenerate = useCallback(() => {
     regenerateNode(id);
   }, [id, regenerateNode]);
 
   // Load video by ID from generations folder
+  /**
+   * Loads a video by its unique ID from the local generations path.
+   * @param videoId - The ID of the video/generation to load.
+   * @returns A promise resolving to the video data or null if not found.
+   */
   const loadVideoById = useCallback(async (videoId: string) => {
     if (!generationsPath) {
       console.error("Generations path not configured");
@@ -352,6 +385,10 @@ export function GenerateVideoNode({ id, data, selected }: NodeProps<GenerateVide
   }, [id, nodeData.videoHistory, nodeData.selectedVideoHistoryIndex, isLoadingCarouselVideo, loadVideoById, updateNodeData]);
 
   // Handle model selection from browse dialog
+  /**
+   * Handles model selection from the external browse dialog.
+   * @param model - The chosen provider model.
+   */
   const handleBrowseModelSelect = useCallback((model: ProviderModel) => {
     const newSelectedModel: SelectedModel = {
       provider: model.provider,

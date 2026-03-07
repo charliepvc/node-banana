@@ -45,6 +45,11 @@ export interface ConnectedInputs {
 /**
  * Helper to determine if a handle ID is an image type
  */
+/**
+ * Checks if a handle ID corresponds to an image input/output.
+ * @param handleId - The ID of the handle to check.
+ * @returns True if the handle is related to image data.
+ */
 function isImageHandle(handleId: string | null | undefined): boolean {
   if (!handleId) return false;
   return handleId === "image" || handleId.startsWith("image-") || handleId.includes("frame");
@@ -53,6 +58,11 @@ function isImageHandle(handleId: string | null | undefined): boolean {
 /**
  * Helper to determine if a handle ID is a text type
  */
+/**
+ * Checks if a handle ID corresponds to a text input/output.
+ * @param handleId - The ID of the handle to check.
+ * @returns True if the handle is related to text data.
+ */
 function isTextHandle(handleId: string | null | undefined): boolean {
   if (!handleId) return false;
   return handleId === "text" || handleId.startsWith("text-") || handleId.includes("prompt");
@@ -60,6 +70,13 @@ function isTextHandle(handleId: string | null | undefined): boolean {
 
 /**
  * Extract output data and type from a source node
+ */
+/**
+ * Extracts the output data and its type from a source node based on the handle.
+ * @param sourceNode - The node from which data originates.
+ * @param sourceHandle - The specific handle ID on the source node.
+ * @param edgeData - Optional metadata associated with the workflow edge.
+ * @returns An object containing the data type and the actual value.
  */
 function getSourceOutput(
   sourceNode: WorkflowNode,
@@ -122,6 +139,16 @@ function getSourceOutput(
 /**
  * Get all connected inputs for a node.
  * Pure function version of workflowStore.getConnectedInputs.
+ */
+/**
+ * Recursively retrieves all connected input data for a specific node.
+ * This is a pure function used for dependency tracking and data flow.
+ * @param nodeId - The ID of the target node.
+ * @param nodes - The complete list of nodes in the workflow.
+ * @param edges - The complete list of edges in the workflow.
+ * @param visited - A set of already visited node IDs to prevent infinite loops.
+ * @param dimmedNodeIds - Optional set of node IDs that are considered inactive.
+ * @returns A structured object containing all connected inputs (images, text, etc.).
  */
 export function getConnectedInputsPure(
   nodeId: string,
@@ -334,6 +361,12 @@ export function getConnectedInputsPure(
 /**
  * Validate workflow structure.
  * Pure function version of workflowStore.validateWorkflow.
+ */
+/**
+ * Validates the integrity and requirements of the workflow structure.
+ * @param nodes - The list of nodes to validate.
+ * @param edges - The list of edges to validate.
+ * @returns An object indicating if the workflow is valid and a list of error messages.
  */
 export function validateWorkflowPure(
   nodes: WorkflowNode[],
