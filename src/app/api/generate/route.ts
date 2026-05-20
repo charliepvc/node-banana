@@ -14,6 +14,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { GenerateRequest, GenerateResponse, ModelType, SelectedModel, ProviderType } from "@/types";
 import { GenerationInput, ModelCapability } from "@/lib/providers/types";
 import { generateWithGemini, generateWithGeminiVideo } from "./providers/gemini";
+import { generateWithVertex, generateWithVertexVideo } from "./providers/vertex";
 import { generateWithReplicate } from "./providers/replicate";
 import { clearFalInputMappingCache as _clearFalInputMappingCache, generateWithFalQueue } from "./providers/fal";
 import { generateWithKie } from "./providers/kie";
@@ -442,6 +443,90 @@ export async function POST(request: NextRequest) {
       }
 
       return buildMediaResponse(output);
+    }
+
+    // Vertex AI Provider
+    if (provider === "vertex") {
+      // Validate Vertex AI configuration
+      const vertexProjectId = request.headers.get("X-Vertex-Project-Id") || process.env.VERTEX_PROJECT_ID;
+      if (!vertexProjectId) {
+        return NextResponse.json<GenerateResponse>(
+          { success: false, error: "Vertex AI not configured. Set VERTEX_PROJECT_ID in .env.local or configure in Settings." },
+          { status: 401 }
+        );
+      }
+      if (!process.env.GOOGLE_APPLICATION_CREDENTIALS) {
+        return NextResponse.json<GenerateResponse>(
+          { success: false, error: "Vertex AI requires GOOGLE_APPLICATION_CREDENTIALS on the server." },
+          { status: 401 }
+        );
+      }
+
+      // Use selectedModel.modelId if available
+      const vertexModel = selectedModel?.modelId || model;
+
+      // Resolve prompt: use top-level prompt, fall back to dynamicInputs.prompt
+      let resolvedPrompt = prompt;
+      if (!resolvedPrompt && dynamicInputs?.prompt) {
+        resolvedPrompt = Array.isArray(dynamicInputs.prompt)
+          ? dynamicInputs.prompt[0]
+          : dynamicInputs.prompt;
+      }
+      if (resolvedPrompt !== undefined && resolvedPrompt !== null && typeof resolvedPrompt !== 'string') {
+        return NextResponse.json<GenerateResponse>(
+          { success: false, error: "prompt must be a string" },
+          { status: 400 }
+        );
+      }
+
+      // Check if this is a Vertex Veo video model request
+      if (selectedModel?.modelId?.startsWith("vertex/veo-")) {
+        const veoParams = { ...(parameters || {}) };
+        if (dynamicInputs?.negative_prompt) {
+          const neg = Array.isArray(dynamicInputs.negative_prompt)
+            ? dynamicInputs.negative_prompt[0]
+            : dynamicInputs.negative_prompt;
+          if (neg) veoParams.negativePrompt = neg;
+        }
+        const result = await generateWithVertexVideo(
+          requestId,
+          request,
+          selectedModel.modelId,
+          resolvedPrompt || "",
+          images || [],
+          veoParams,
+        );
+
+        if (!result.success) {
+          return NextResponse.json<GenerateResponse>(
+            { success: false, error: result.error || "Video generation failed" },
+            { status: 500 }
+          );
+        }
+
+        const output = result.outputs?.[0];
+        if (!output?.data && !output?.url) {
+          return NextResponse.json<GenerateResponse>(
+            { success: false, error: "No output in video generation result" },
+            { status: 500 }
+          );
+        }
+
+        return buildMediaResponse(output);
+      }
+
+      // Image generation via Vertex
+      return await generateWithVertex(
+        requestId,
+        request,
+        resolvedPrompt,
+        images || [],
+        vertexModel,
+        aspectRatio,
+        resolution,
+        useGoogleSearch,
+        useImageSearch
+      );
     }
 
     // Default: Use Gemini

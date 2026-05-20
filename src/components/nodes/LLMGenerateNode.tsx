@@ -9,6 +9,7 @@ import { LLMGenerateNodeData, LLMProvider, LLMModelType } from "@/types";
 
 const PROVIDERS: { value: LLMProvider; label: string }[] = [
   { value: "google", label: "Google" },
+  { value: "vertex", label: "Vertex AI" },
   { value: "openai", label: "OpenAI" },
   { value: "anthropic", label: "Anthropic" },
 ];
@@ -17,6 +18,12 @@ const MODELS: Record<LLMProvider, { value: LLMModelType; label: string }[]> = {
   google: [
     { value: "gemini-3-flash-preview", label: "Gemini 3 Flash" },
     { value: "gemini-2.5-flash", label: "Gemini 2.5 Flash" },
+    { value: "gemini-3-pro-preview", label: "Gemini 3.0 Pro" },
+    { value: "gemini-3.1-pro-preview", label: "Gemini 3.1 Pro" },
+  ],
+  vertex: [
+    { value: "gemini-2.5-flash", label: "Gemini 2.5 Flash" },
+    { value: "gemini-3-flash-preview", label: "Gemini 3 Flash" },
     { value: "gemini-3-pro-preview", label: "Gemini 3.0 Pro" },
     { value: "gemini-3.1-pro-preview", label: "Gemini 3.1 Pro" },
   ],

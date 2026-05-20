@@ -426,6 +426,76 @@ const GEMINI_VIDEO_MODELS: ProviderModel[] = [
   },
 ];
 
+// Vertex AI models (same Gemini models but accessed via Vertex API)
+const VERTEX_IMAGE_MODELS: ProviderModel[] = [
+  {
+    id: "vertex/nano-banana",
+    name: "Nano Banana (Vertex)",
+    description: "Fast image generation with Gemini 2.5 Flash via Vertex AI. Uses GCP service account authentication.",
+    provider: "vertex",
+    capabilities: ["text-to-image", "image-to-image"],
+    coverImage: undefined,
+    pricing: { type: "per-run", amount: 0.039, currency: "USD" },
+  },
+  {
+    id: "vertex/nano-banana-2",
+    name: "Nano Banana 2 (Vertex)",
+    description: "High-efficiency image generation with Gemini 3.1 Flash via Vertex AI. Supports resolution control and Google Search grounding.",
+    provider: "vertex",
+    capabilities: ["text-to-image", "image-to-image"],
+    coverImage: undefined,
+    pricing: { type: "per-run", amount: 0.067, currency: "USD" },
+  },
+  {
+    id: "vertex/nano-banana-pro",
+    name: "Nano Banana Pro (Vertex)",
+    description: "High-quality image generation with Gemini 3 Pro via Vertex AI. Supports resolution control and Google Search grounding.",
+    provider: "vertex",
+    capabilities: ["text-to-image", "image-to-image"],
+    coverImage: undefined,
+    pricing: { type: "per-run", amount: 0.134, currency: "USD" },
+  },
+];
+
+const VERTEX_VIDEO_MODELS: ProviderModel[] = [
+  {
+    id: "vertex/veo-3.1/text-to-video",
+    name: "Veo 3.1 (Vertex)",
+    description: "Highest quality video generation with Veo 3.1 via Vertex AI.",
+    provider: "vertex",
+    capabilities: ["text-to-video"],
+    coverImage: undefined,
+    pricing: { type: "per-second", amount: 0.40, currency: "USD" },
+  },
+  {
+    id: "vertex/veo-3.1/image-to-video",
+    name: "Veo 3.1 I2V (Vertex)",
+    description: "Image-to-video generation with Veo 3.1 via Vertex AI.",
+    provider: "vertex",
+    capabilities: ["image-to-video"],
+    coverImage: undefined,
+    pricing: { type: "per-second", amount: 0.40, currency: "USD" },
+  },
+  {
+    id: "vertex/veo-3.1-fast/text-to-video",
+    name: "Veo 3.1 Fast (Vertex)",
+    description: "Fast video generation with Veo 3.1 Fast via Vertex AI.",
+    provider: "vertex",
+    capabilities: ["text-to-video"],
+    coverImage: undefined,
+    pricing: { type: "per-second", amount: 0.15, currency: "USD" },
+  },
+  {
+    id: "vertex/veo-3.1-fast/image-to-video",
+    name: "Veo 3.1 Fast I2V (Vertex)",
+    description: "Fast image-to-video with Veo 3.1 Fast via Vertex AI.",
+    provider: "vertex",
+    capabilities: ["image-to-video"],
+    coverImage: undefined,
+    pricing: { type: "per-second", amount: 0.15, currency: "USD" },
+  },
+];
+
 // WaveSpeed models are now fetched dynamically from https://api.wavespeed.ai/api/v3/models
 
 // ============ Replicate Types ============
@@ -956,6 +1026,7 @@ export async function GET(
   const providersToFetch: ProviderType[] = [];
   let includeGemini = false;
   let includeKie = false;
+  let includeVertex = false;
 
   if (providerFilter) {
     if (providerFilter === "gemini") {
@@ -964,6 +1035,8 @@ export async function GET(
     } else if (providerFilter === "kie") {
       // Only Kie requested - no external API calls needed (hardcoded models)
       includeKie = true;
+    } else if (providerFilter === "vertex") {
+      includeVertex = true;
     } else if (providerFilter === "wavespeed") {
       if (wavespeedKey) {
         // WaveSpeed requested with key - fetch from API
@@ -988,6 +1061,7 @@ export async function GET(
     // Include all providers that have keys configured
     includeGemini = true; // Gemini always available
     includeKie = kieKey ? true : false; // Kie only if API key is configured
+    includeVertex = !!(process.env.VERTEX_PROJECT_ID && process.env.GOOGLE_APPLICATION_CREDENTIALS);
     if (wavespeedKey) {
       providersToFetch.push("wavespeed"); // WaveSpeed if key is configured
     }
@@ -1045,6 +1119,21 @@ export async function GET(
       success: true,
       count: kieModels.length,
       cached: true, // Hardcoded models are effectively "cached"
+    };
+    anyFromCache = true;
+  }
+
+  // Add Vertex AI models if included
+  if (includeVertex) {
+    let vertexModels = [...VERTEX_IMAGE_MODELS, ...VERTEX_VIDEO_MODELS];
+    if (searchQuery) {
+      vertexModels = filterModelsBySearch(vertexModels, searchQuery);
+    }
+    allModels.push(...vertexModels);
+    providerResults["vertex"] = {
+      success: true,
+      count: vertexModels.length,
+      cached: true,
     };
     anyFromCache = true;
   }

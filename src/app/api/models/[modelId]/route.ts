@@ -937,6 +937,25 @@ function getGeminiVideoSchema(modelId: string): ExtractedSchema | null {
 }
 
 /**
+ * Get schema for Vertex AI models (same as Gemini but with vertex/ prefix)
+ */
+function getVertexSchema(modelId: string): ExtractedSchema | null {
+  // Strip "vertex/" prefix to get the underlying model type
+  const baseModelId = modelId.replace(/^vertex\//, "");
+
+  // Video model schemas (same as Gemini video)
+  const videoSchema = getGeminiVideoSchema(baseModelId);
+  if (videoSchema) return videoSchema;
+
+  // Image models: Vertex uses same Gemini models, no dynamic params
+  if (baseModelId.startsWith("nano-banana")) {
+    return { parameters: [], inputs: [] };
+  }
+
+  return null;
+}
+
+/**
  * Get static schema for WaveSpeed models (fallback when dynamic schema not available)
  */
 function getStaticWaveSpeedSchema(modelId: string): ExtractedSchema {
@@ -1170,11 +1189,11 @@ export async function GET(
   const decodedModelId = decodeURIComponent(modelId);
   const provider = request.nextUrl.searchParams.get("provider") as ProviderType | null;
 
-  if (!provider || (provider !== "replicate" && provider !== "fal" && provider !== "kie" && provider !== "wavespeed" && provider !== "gemini")) {
+  if (!provider || (provider !== "replicate" && provider !== "fal" && provider !== "kie" && provider !== "wavespeed" && provider !== "gemini" && provider !== "vertex")) {
     return NextResponse.json<SchemaErrorResponse>(
       {
         success: false,
-        error: "Invalid or missing provider. Use ?provider=replicate, ?provider=fal, ?provider=kie, ?provider=wavespeed, or ?provider=gemini",
+        error: "Invalid or missing provider. Use ?provider=replicate, ?provider=fal, ?provider=kie, ?provider=wavespeed, ?provider=gemini, or ?provider=vertex",
       },
       { status: 400 }
     );
@@ -1202,6 +1221,13 @@ export async function GET(
         result = geminiVideoSchema;
       } else {
         // Gemini image models don't use schema endpoint (params are built-in)
+        result = { parameters: [], inputs: [] };
+      }
+    } else if (provider === "vertex") {
+      const vertexSchema = getVertexSchema(decodedModelId);
+      if (vertexSchema) {
+        result = vertexSchema;
+      } else {
         result = { parameters: [], inputs: [] };
       }
     } else if (provider === "replicate") {

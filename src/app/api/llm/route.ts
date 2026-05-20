@@ -113,6 +113,112 @@ async function generateWithGoogle(
   return text;
 }
 
+async function generateWithVertex(
+  prompt: string,
+  model: LLMModelType,
+  temperature: number,
+  maxTokens: number,
+  images?: string[],
+  requestId?: string,
+  userConfig?: string | null  // JSON string: { project, location } from headers
+): Promise<string> {
+  // Parse config: user header override or env vars
+  let project: string | undefined;
+  let location: string | undefined;
+  
+  if (userConfig) {
+    try {
+      const parsed = JSON.parse(userConfig);
+      project = parsed.project;
+      location = parsed.location;
+    } catch {
+      project = userConfig;
+    }
+  }
+  
+  project = project || process.env.VERTEX_PROJECT_ID;
+  location = location || process.env.VERTEX_LOCATION || "us-central1";
+  
+  if (!project) {
+    logger.error('api.error', 'VERTEX_PROJECT_ID not configured', { requestId });
+    throw new Error("Vertex AI not configured. Add VERTEX_PROJECT_ID and GOOGLE_APPLICATION_CREDENTIALS to .env.local or configure in Settings.");
+  }
+  
+  if (!process.env.GOOGLE_APPLICATION_CREDENTIALS) {
+    logger.error('api.error', 'GOOGLE_APPLICATION_CREDENTIALS not set', { requestId });
+    throw new Error("Vertex AI requires GOOGLE_APPLICATION_CREDENTIALS environment variable pointing to a GCP service account JSON file.");
+  }
+
+  const ai = new GoogleGenAI({ vertexai: true, project, location });
+  const modelId = GOOGLE_MODEL_MAP[model];
+
+  if (!modelId) {
+    logger.error('api.error', `Unknown model for Vertex: ${model}`, { requestId });
+    throw new Error(`Unknown model for Vertex AI: ${model}`);
+  }
+
+  logger.info('api.llm', 'Calling Vertex AI API', {
+    requestId,
+    model: modelId,
+    temperature,
+    maxTokens,
+    imageCount: images?.length || 0,
+    promptLength: prompt.length,
+  });
+
+  // Build multimodal content if images are provided
+  let contents: string | Array<{ inlineData: { mimeType: string; data: string } } | { text: string }>;
+  if (images && images.length > 0) {
+    contents = [
+      ...images.map((img) => {
+        const matches = img.match(/^data:(.+?);base64,(.+)$/);
+        if (matches) {
+          return {
+            inlineData: {
+              mimeType: matches[1],
+              data: matches[2],
+            },
+          };
+        }
+        return {
+          inlineData: {
+            mimeType: "image/png",
+            data: img,
+          },
+        };
+      }),
+      { text: prompt },
+    ];
+  } else {
+    contents = prompt;
+  }
+
+  const startTime = Date.now();
+  const response = await ai.models.generateContent({
+    model: modelId,
+    contents,
+    config: {
+      temperature,
+      maxOutputTokens: maxTokens,
+    },
+  });
+  const duration = Date.now() - startTime;
+
+  const text = response.text;
+  if (!text) {
+    logger.error('api.error', 'No text in Vertex AI response', { requestId });
+    throw new Error("No text in Vertex AI response");
+  }
+
+  logger.info('api.llm', 'Vertex AI API response received', {
+    requestId,
+    duration,
+    responseLength: text.length,
+  });
+
+  return text;
+}
+
 async function generateWithOpenAI(
   prompt: string,
   model: LLMModelType,
@@ -297,6 +403,11 @@ export async function POST(request: NextRequest) {
     const geminiApiKey = request.headers.get("X-Gemini-API-Key");
     const openaiApiKey = request.headers.get("X-OpenAI-API-Key");
     const anthropicApiKey = request.headers.get("X-Anthropic-API-Key");
+    const vertexProjectId = request.headers.get("X-Vertex-Project-Id");
+    const vertexLocation = request.headers.get("X-Vertex-Location");
+    const vertexConfig = vertexProjectId 
+      ? JSON.stringify({ project: vertexProjectId, location: vertexLocation || undefined })
+      : null;
 
     const body: LLMGenerateRequest = await request.json();
     const {
@@ -331,6 +442,8 @@ export async function POST(request: NextRequest) {
 
     if (provider === "google") {
       text = await generateWithGoogle(prompt, model, temperature, maxTokens, images, requestId, geminiApiKey);
+    } else if (provider === "vertex") {
+      text = await generateWithVertex(prompt, model, temperature, maxTokens, images, requestId, vertexConfig);
     } else if (provider === "openai") {
       text = await generateWithOpenAI(prompt, model, temperature, maxTokens, images, requestId, openaiApiKey);
     } else if (provider === "anthropic") {

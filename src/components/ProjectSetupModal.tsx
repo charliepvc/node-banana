@@ -5,6 +5,7 @@ import { generateWorkflowId, useWorkflowStore } from "@/store/workflowStore";
 import { ProviderType, ProviderSettings, NodeDefaultsConfig, LLMProvider, LLMModelType } from "@/types";
 import { CanvasNavigationSettings, PanMode, ZoomMode, SelectionMode } from "@/types/canvas";
 import { EnvStatusResponse } from "@/app/api/env-status/route";
+import { VertexIcon } from "@/components/nodes/VertexIcon";
 import { loadNodeDefaults, saveNodeDefaults } from "@/store/utils/localStorage";
 import { ProviderModel } from "@/lib/providers/types";
 import { ModelSearchDialog } from "@/components/modals/ModelSearchDialog";
@@ -12,6 +13,7 @@ import { ModelSearchDialog } from "@/components/modals/ModelSearchDialog";
 // LLM provider and model options (mirrored from LLMGenerateNode)
 const LLM_PROVIDERS: { value: LLMProvider; label: string }[] = [
   { value: "google", label: "Google" },
+  { value: "vertex", label: "Vertex AI" },
   { value: "openai", label: "OpenAI" },
   { value: "anthropic", label: "Anthropic" },
 ];
@@ -20,6 +22,12 @@ const LLM_MODELS: Record<LLMProvider, { value: LLMModelType; label: string }[]> 
   google: [
     { value: "gemini-3-flash-preview", label: "Gemini 3 Flash" },
     { value: "gemini-2.5-flash", label: "Gemini 2.5 Flash" },
+    { value: "gemini-3-pro-preview", label: "Gemini 3.0 Pro" },
+    { value: "gemini-3.1-pro-preview", label: "Gemini 3.1 Pro" },
+  ],
+  vertex: [
+    { value: "gemini-2.5-flash", label: "Gemini 2.5 Flash" },
+    { value: "gemini-3-flash-preview", label: "Gemini 3 Flash" },
     { value: "gemini-3-pro-preview", label: "Gemini 3.0 Pro" },
     { value: "gemini-3.1-pro-preview", label: "Gemini 3.1 Pro" },
   ],
@@ -68,6 +76,8 @@ const getProviderIcon = (provider: ProviderType) => {
   switch (provider) {
     case "gemini":
       return <GeminiIcon />;
+    case "vertex":
+      return <VertexIcon />;
     case "replicate":
       return <ReplicateIcon />;
     case "fal":
@@ -155,6 +165,7 @@ export function ProjectSetupModal({
   const [localProviders, setLocalProviders] = useState<ProviderSettings>(providerSettings);
   const [showApiKey, setShowApiKey] = useState<Record<ProviderType, boolean>>({
     gemini: false,
+    vertex: false,
     openai: false,
     anthropic: false,
     replicate: false,
@@ -164,6 +175,7 @@ export function ProjectSetupModal({
   });
   const [overrideActive, setOverrideActive] = useState<Record<ProviderType, boolean>>({
     gemini: false,
+    vertex: false,
     openai: false,
     anthropic: false,
     replicate: false,
@@ -201,10 +213,11 @@ export function ProjectSetupModal({
 
       // Sync local providers state
       setLocalProviders(providerSettings);
-      setShowApiKey({ gemini: false, openai: false, anthropic: false, replicate: false, fal: false, kie: false, wavespeed: false });
+      setShowApiKey({ gemini: false, vertex: false, openai: false, anthropic: false, replicate: false, fal: false, kie: false, wavespeed: false });
       // Initialize override as active if user already has a key set
       setOverrideActive({
         gemini: !!providerSettings.providers.gemini?.apiKey,
+        vertex: !!providerSettings.providers.vertex?.apiKey,
         openai: !!providerSettings.providers.openai?.apiKey,
         anthropic: !!providerSettings.providers.anthropic?.apiKey,
         replicate: !!providerSettings.providers.replicate?.apiKey,
@@ -308,7 +321,7 @@ export function ProjectSetupModal({
 
   const handleSaveProviders = () => {
     // Save each provider's settings
-    const providerIds: ProviderType[] = ["gemini", "openai", "anthropic", "replicate", "fal", "kie", "wavespeed"];
+    const providerIds: ProviderType[] = ["gemini", "vertex", "openai", "anthropic", "replicate", "fal", "kie", "wavespeed"];
     for (const providerId of providerIds) {
       const local = localProviders.providers[providerId];
       const current = providerSettings.providers[providerId];
@@ -529,6 +542,85 @@ export function ProjectSetupModal({
                         Cancel
                       </button>
                     )}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Vertex AI Provider */}
+            <div className="p-3 bg-neutral-900 rounded-lg border border-neutral-700">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <VertexIcon />
+                  <span className="text-sm font-medium text-neutral-100">Google Vertex AI</span>
+                  <span className="text-xs text-neutral-500">(Enterprise)</span>
+                </div>
+                {envStatus?.vertex && !overrideActive.vertex ? (
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-green-400">Configured via .env</span>
+                    <button
+                      type="button"
+                      onClick={() => setOverrideActive((prev) => ({ ...prev, vertex: true }))}
+                      className="px-2 py-1 text-xs text-neutral-400 hover:text-neutral-200 transition-colors"
+                    >
+                      Override
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex flex-col gap-1">
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        value={(() => {
+                          try {
+                            const parsed = JSON.parse(localProviders.providers.vertex?.apiKey || "{}");
+                            return parsed.project || "";
+                          } catch { return localProviders.providers.vertex?.apiKey || ""; }
+                        })()}
+                        onChange={(e) => {
+                          const existing = localProviders.providers.vertex?.apiKey;
+                          let location = "us-central1";
+                          try { const p = JSON.parse(existing || "{}"); location = p.location || location; } catch {}
+                          const newVal = e.target.value ? JSON.stringify({ project: e.target.value, location }) : null;
+                          updateLocalProvider("vertex", { apiKey: newVal });
+                        }}
+                        placeholder="GCP Project ID"
+                        className="w-36 px-2 py-1 bg-neutral-800 border border-neutral-600 rounded text-neutral-100 text-xs focus:outline-none focus:border-neutral-500"
+                      />
+                      <input
+                        type="text"
+                        value={(() => {
+                          try {
+                            const parsed = JSON.parse(localProviders.providers.vertex?.apiKey || "{}");
+                            return parsed.location || "us-central1";
+                          } catch { return "us-central1"; }
+                        })()}
+                        onChange={(e) => {
+                          const existing = localProviders.providers.vertex?.apiKey;
+                          let project = "";
+                          try { const p = JSON.parse(existing || "{}"); project = p.project || ""; } catch {}
+                          const newVal = project ? JSON.stringify({ project, location: e.target.value }) : null;
+                          updateLocalProvider("vertex", { apiKey: newVal });
+                        }}
+                        placeholder="Region (us-central1)"
+                        className="w-32 px-2 py-1 bg-neutral-800 border border-neutral-600 rounded text-neutral-100 text-xs focus:outline-none focus:border-neutral-500"
+                      />
+                    </div>
+                    {envStatus?.vertex && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setOverrideActive((prev) => ({ ...prev, vertex: false }));
+                          updateLocalProvider("vertex", { apiKey: null });
+                        }}
+                        className="text-xs text-neutral-500 hover:text-neutral-300 self-end"
+                      >
+                        Cancel
+                      </button>
+                    )}
+                    <p className="text-xs text-neutral-500 mt-1">
+                      Requires GOOGLE_APPLICATION_CREDENTIALS env var on server.
+                    </p>
                   </div>
                 )}
               </div>

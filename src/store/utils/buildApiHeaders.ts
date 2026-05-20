@@ -12,6 +12,7 @@ import { ProviderType, ProviderSettings, LLMProvider } from "@/types";
  */
 const PROVIDER_HEADER_MAP: Record<ProviderType, string> = {
   gemini: "X-Gemini-API-Key",
+  vertex: "X-Vertex-Project-Id",
   replicate: "X-Replicate-API-Key",
   fal: "X-Fal-API-Key",
   kie: "X-Kie-Key",
@@ -33,6 +34,23 @@ export function buildGenerateHeaders(
   };
 
   const providerKey = provider as ProviderType;
+  
+  // Vertex AI: special handling - stores project+location as JSON in apiKey
+  if (providerKey === "vertex") {
+    const config = providerSettings.providers.vertex;
+    if (config?.apiKey) {
+      try {
+        const parsed = JSON.parse(config.apiKey);
+        if (parsed.project) headers["X-Vertex-Project-Id"] = parsed.project;
+        if (parsed.location) headers["X-Vertex-Location"] = parsed.location;
+      } catch {
+        // If not JSON, treat apiKey as raw project ID
+        headers["X-Vertex-Project-Id"] = config.apiKey;
+      }
+    }
+    return headers;
+  }
+  
   const headerName = PROVIDER_HEADER_MAP[providerKey];
   if (headerName) {
     const config = providerSettings.providers[providerKey];
@@ -56,6 +74,21 @@ export function buildLlmHeaders(
     "Content-Type": "application/json",
   };
 
+  // Vertex AI LLM: special handling - stores project+location as JSON in apiKey
+  if (llmProvider === "vertex") {
+    const vertexConfig = providerSettings.providers.vertex;
+    if (vertexConfig?.apiKey) {
+      try {
+        const parsed = JSON.parse(vertexConfig.apiKey);
+        if (parsed.project) headers["X-Vertex-Project-Id"] = parsed.project;
+        if (parsed.location) headers["X-Vertex-Location"] = parsed.location;
+      } catch {
+        headers["X-Vertex-Project-Id"] = vertexConfig.apiKey;
+      }
+    }
+    return headers;
+  }
+  
   if (llmProvider === "google") {
     const geminiConfig = providerSettings.providers.gemini;
     if (geminiConfig?.apiKey) {

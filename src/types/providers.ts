@@ -6,7 +6,7 @@
  */
 
 // Provider Types for multi-provider support (image/video generation)
-export type ProviderType = "gemini" | "openai" | "anthropic" | "replicate" | "fal" | "kie" | "wavespeed";
+export type ProviderType = "gemini" | "vertex" | "openai" | "anthropic" | "replicate" | "fal" | "kie" | "wavespeed";
 
 // Model pricing info (stored when model is selected)
 export interface SelectedModelPricing {
@@ -36,7 +36,7 @@ export interface ProviderSettings {
 }
 
 // LLM Provider Options
-export type LLMProvider = "google" | "openai" | "anthropic";
+export type LLMProvider = "google" | "vertex" | "openai" | "anthropic";
 
 // LLM Model Options
 export type LLMModelType =

@@ -50,3 +50,6 @@ logs/*.json
 .agents/
 
 .superset/
+
+/graphify-out*
+.graphifyignore

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 export interface EnvStatusResponse {
   gemini: boolean;
+  vertex: boolean;
   openai: boolean;
   anthropic: boolean;
   replicate: boolean;
@@ -14,6 +15,7 @@ export async function GET() {
   // Check which API keys are configured via environment variables
   const status: EnvStatusResponse = {
     gemini: !!process.env.GEMINI_API_KEY,
+    vertex: !!(process.env.VERTEX_PROJECT_ID && process.env.GOOGLE_APPLICATION_CREDENTIALS),
     openai: !!process.env.OPENAI_API_KEY,
     anthropic: !!process.env.ANTHROPIC_API_KEY,
     replicate: !!process.env.REPLICATE_API_KEY,

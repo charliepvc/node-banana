@@ -2284,11 +2284,13 @@ export function useProviderApiKeys() {
   return useWorkflowStore(
     useShallow((state) => ({
       geminiApiKey: state.providerSettings.providers.gemini?.apiKey ?? null,
+      vertexConfig: state.providerSettings.providers.vertex?.apiKey ?? null,
       replicateApiKey: state.providerSettings.providers.replicate?.apiKey ?? null,
       falApiKey: state.providerSettings.providers.fal?.apiKey ?? null,
       kieApiKey: state.providerSettings.providers.kie?.apiKey ?? null,
       wavespeedApiKey: state.providerSettings.providers.wavespeed?.apiKey ?? null,
       // Provider enabled states (for conditional UI)
+      vertexEnabled: state.providerSettings.providers.vertex?.enabled ?? false,
       replicateEnabled: state.providerSettings.providers.replicate?.enabled ?? false,
       kieEnabled: state.providerSettings.providers.kie?.enabled ?? false,
     }))
