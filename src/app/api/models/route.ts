@@ -1061,7 +1061,7 @@ export async function GET(
     // Include all providers that have keys configured
     includeGemini = true; // Gemini always available
     includeKie = kieKey ? true : false; // Kie only if API key is configured
-    includeVertex = !!(process.env.VERTEX_PROJECT_ID && process.env.GOOGLE_APPLICATION_CREDENTIALS);
+    includeVertex = !!process.env.VERTEX_PROJECT_ID;
     if (wavespeedKey) {
       providersToFetch.push("wavespeed"); // WaveSpeed if key is configured
     }

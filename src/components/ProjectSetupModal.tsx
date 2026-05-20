@@ -619,7 +619,7 @@ export function ProjectSetupModal({
                       </button>
                     )}
                     <p className="text-xs text-neutral-500 mt-1">
-                      Requires GOOGLE_APPLICATION_CREDENTIALS env var on server.
+                       Uses ADC (GOOGLE_APPLICATION_CREDENTIALS or gcloud auth)
                     </p>
                   </div>
                 )}

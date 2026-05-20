@@ -2,7 +2,7 @@
  * Vertex AI Provider for Generate API Route
  *
  * Handles image generation and video generation using Google's Vertex AI API models.
- * Uses GCP service account credentials (GOOGLE_APPLICATION_CREDENTIALS) instead of API keys.
+ * Uses GCP ADC (Application Default Credentials): GOOGLE_APPLICATION_CREDENTIALS or gcloud auth.
  */
 
 import { NextResponse } from "next/server";
@@ -26,11 +26,10 @@ function getVertexConfig(request: Request): { project: string; location: string 
     throw new Error("Vertex AI not configured. Set VERTEX_PROJECT_ID in .env.local or configure in Settings.");
   }
 
-  // Validate GOOGLE_APPLICATION_CREDENTIALS exists
-  if (!process.env.GOOGLE_APPLICATION_CREDENTIALS) {
-    throw new Error("Vertex AI requires GOOGLE_APPLICATION_CREDENTIALS environment variable pointing to a GCP service account JSON file.");
-  }
-
+  // Credentials are resolved by @google/genai via ADC (Application Default Credentials):
+  // 1. GOOGLE_APPLICATION_CREDENTIALS env var (service account JSON)
+  // 2. gcloud auth application-default login
+  // 3. Default service account (if running on GCP)
   return { project, location };
 }
 

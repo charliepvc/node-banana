@@ -455,13 +455,6 @@ export async function POST(request: NextRequest) {
           { status: 401 }
         );
       }
-      if (!process.env.GOOGLE_APPLICATION_CREDENTIALS) {
-        return NextResponse.json<GenerateResponse>(
-          { success: false, error: "Vertex AI requires GOOGLE_APPLICATION_CREDENTIALS on the server." },
-          { status: 401 }
-        );
-      }
-
       // Use selectedModel.modelId if available
       const vertexModel = selectedModel?.modelId || model;
 

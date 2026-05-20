@@ -23,10 +23,10 @@ const VEO_ASPECT_RATIOS = ["16:9", "9:16"] as const;
 const VEO_DURATIONS = ["4", "6", "8"] as const;
 const VEO_RESOLUTIONS = ["720p", "1080p", "4k"] as const;
 
-/** Returns true for Gemini-native Veo video models */
+/** Returns true for Gemini or Vertex AI Veo video models */
 function isVeoModel(modelId: string | undefined): boolean {
   if (!modelId) return false;
-  return modelId.startsWith("veo-");
+  return modelId.startsWith("veo-") || modelId.startsWith("vertex/veo-");
 }
 
 /** Build the hardcoded inputSchema for a Veo model, or undefined for non-Veo */
@@ -50,7 +50,7 @@ export function GenerateVideoNode({ id, data, selected }: NodeProps<GenerateVide
   const commentNavigation = useCommentNavigation(id);
   const updateNodeData = useWorkflowStore((state) => state.updateNodeData);
   // Use stable selector for API keys to prevent unnecessary re-fetches
-  const { geminiApiKey, replicateApiKey, falApiKey, kieApiKey, replicateEnabled, kieEnabled } = useProviderApiKeys();
+  const { geminiApiKey, replicateApiKey, falApiKey, kieApiKey, vertexConfig, vertexEnabled, replicateEnabled, kieEnabled } = useProviderApiKeys();
   const generationsPath = useWorkflowStore((state) => state.generationsPath);
   const [externalModels, setExternalModels] = useState<ProviderModel[]>([]);
   const [isLoadingModels, setIsLoadingModels] = useState(false);
@@ -68,6 +68,8 @@ export function GenerateVideoNode({ id, data, selected }: NodeProps<GenerateVide
     if (geminiApiKey) {
       providers.push({ id: "gemini", name: "Gemini" });
     }
+    // Vertex AI - always shown (uses ADC: GOOGLE_APPLICATION_CREDENTIALS or gcloud auth application-default login)
+    providers.push({ id: "vertex", name: "Vertex AI" });
     // fal.ai is always available (works without key but rate limited)
     providers.push({ id: "fal", name: "fal.ai" });
     // Add Replicate if configured

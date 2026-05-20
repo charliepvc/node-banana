@@ -374,6 +374,8 @@ export function ModelSearchDialog({
     switch (provider) {
       case "gemini":
         return "bg-green-500/20 text-green-300";
+      case "vertex":
+        return "bg-blue-500/20 text-blue-300";
       case "replicate":
         return "bg-blue-500/20 text-blue-300";
       case "fal":
@@ -392,6 +394,8 @@ export function ModelSearchDialog({
     switch (provider) {
       case "gemini":
         return "Gemini";
+      case "vertex":
+        return "Vertex AI";
       case "replicate":
         return "Replicate";
       case "fal":

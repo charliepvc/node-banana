@@ -141,13 +141,13 @@ async function generateWithVertex(
   
   if (!project) {
     logger.error('api.error', 'VERTEX_PROJECT_ID not configured', { requestId });
-    throw new Error("Vertex AI not configured. Add VERTEX_PROJECT_ID and GOOGLE_APPLICATION_CREDENTIALS to .env.local or configure in Settings.");
+    throw new Error("Vertex AI not configured. Set VERTEX_PROJECT_ID in .env.local or configure in Settings.");
   }
   
-  if (!process.env.GOOGLE_APPLICATION_CREDENTIALS) {
-    logger.error('api.error', 'GOOGLE_APPLICATION_CREDENTIALS not set', { requestId });
-    throw new Error("Vertex AI requires GOOGLE_APPLICATION_CREDENTIALS environment variable pointing to a GCP service account JSON file.");
-  }
+  // Credentials are resolved by @google/genai via ADC (Application Default Credentials):
+  // 1. GOOGLE_APPLICATION_CREDENTIALS env var (service account JSON)
+  // 2. gcloud auth application-default login
+  // 3. Default service account (if running on GCP)
 
   const ai = new GoogleGenAI({ vertexai: true, project, location });
   const modelId = GOOGLE_MODEL_MAP[model];

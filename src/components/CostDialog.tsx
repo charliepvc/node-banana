@@ -17,6 +17,7 @@ interface CostDialogProps {
 function ProviderIcon({ provider }: { provider: ProviderType }) {
   const colors: Record<ProviderType, { bg: string; text: string }> = {
     gemini: { bg: "bg-green-500/20", text: "text-green-300" },
+    vertex: { bg: "bg-blue-500/20", text: "text-blue-300" },
     fal: { bg: "bg-purple-500/20", text: "text-purple-300" },
     replicate: { bg: "bg-blue-500/20", text: "text-blue-300" },
     openai: { bg: "bg-teal-500/20", text: "text-teal-300" },
@@ -27,6 +28,7 @@ function ProviderIcon({ provider }: { provider: ProviderType }) {
 
   const labels: Record<ProviderType, string> = {
     gemini: "G",
+    vertex: "V",
     fal: "f",
     replicate: "R",
     openai: "O",
@@ -50,6 +52,7 @@ function ProviderIcon({ provider }: { provider: ProviderType }) {
 function getProviderDisplayName(provider: ProviderType): string {
   const names: Record<ProviderType, string> = {
     gemini: "Gemini",
+    vertex: "Vertex AI",
     fal: "fal.ai",
     replicate: "Replicate",
     openai: "OpenAI",

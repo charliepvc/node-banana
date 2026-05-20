@@ -42,7 +42,7 @@ export function GenerateImageNode({ id, data, selected }: NodeProps<NanoBananaNo
   const updateNodeData = useWorkflowStore((state) => state.updateNodeData);
   const generationsPath = useWorkflowStore((state) => state.generationsPath);
   // Use stable selector for API keys to prevent unnecessary re-fetches
-  const { replicateApiKey, falApiKey, kieApiKey, replicateEnabled, kieEnabled } = useProviderApiKeys();
+  const { replicateApiKey, falApiKey, kieApiKey, vertexConfig, replicateEnabled, kieEnabled } = useProviderApiKeys();
   const [isLoadingCarouselImage, setIsLoadingCarouselImage] = useState(false);
   const [externalModels, setExternalModels] = useState<ProviderModel[]>([]);
   const [isLoadingModels, setIsLoadingModels] = useState(false);
@@ -57,6 +57,8 @@ export function GenerateImageNode({ id, data, selected }: NodeProps<NanoBananaNo
     const providers: { id: ProviderType; name: string }[] = [];
     // Gemini is always available
     providers.push({ id: "gemini", name: "Gemini" });
+    // Vertex AI - always shown (server validates config)
+    providers.push({ id: "vertex", name: "Vertex AI" });
     // fal.ai is always available (works without key but rate limited)
     providers.push({ id: "fal", name: "fal.ai" });
     // Add Replicate if configured
@@ -95,7 +97,7 @@ export function GenerateImageNode({ id, data, selected }: NodeProps<NanoBananaNo
 
   // Fetch models from external providers when provider changes
   const fetchModels = useCallback(async () => {
-    if (currentProvider === "gemini") {
+    if (isNativeGoogleProvider) {
       setExternalModels([]);
       setModelsFetchError(null);
       return;
@@ -370,7 +372,8 @@ export function GenerateImageNode({ id, data, selected }: NodeProps<NanoBananaNo
     setIsBrowseDialogOpen(false);
   }, [id, updateNodeData]);
 
-  const isGeminiProvider = currentProvider === "gemini";
+  // Vertex AI uses the same Gemini models, so they share the same parameter logic
+  const isNativeGoogleProvider = currentProvider === "gemini" || currentProvider === "vertex";
 
   // Dynamic title based on selected model - just the model name
   const displayTitle = useMemo(() => {
@@ -405,7 +408,8 @@ export function GenerateImageNode({ id, data, selected }: NodeProps<NanoBananaNo
     return null;
   }, [isGeminiOnly]);
   // Use selectedModel.modelId for Gemini models, fallback to legacy model field
-  const currentModelId = isGeminiProvider ? (nodeData.selectedModel?.modelId || nodeData.model) : null;
+  // Extract base model ID from selected model (strip provider prefix for Vertex)
+  const currentModelId = isNativeGoogleProvider ? (nodeData.selectedModel?.modelId?.replace(/^vertex\//, '') || nodeData.model) : null;
   const supportsResolution = currentModelId === "nano-banana-pro" || currentModelId === "nano-banana-2";
   const aspectRatios = currentModelId === "nano-banana-2" ? EXTENDED_ASPECT_RATIOS : BASE_ASPECT_RATIOS;
   const resolutions = currentModelId === "nano-banana-2" ? RESOLUTIONS_NB2 : RESOLUTIONS_PRO;
@@ -696,8 +700,8 @@ export function GenerateImageNode({ id, data, selected }: NodeProps<NanoBananaNo
           />
         )}
 
-        {/* Aspect ratio and resolution row - only for Gemini models */}
-        {currentProvider === "gemini" && (
+        {/* Aspect ratio and resolution row - only for Gemini & Vertex models */}
+        {isNativeGoogleProvider && (
           <div className="flex gap-1.5 shrink-0">
             <select
               value={nodeData.aspectRatio}
@@ -727,7 +731,7 @@ export function GenerateImageNode({ id, data, selected }: NodeProps<NanoBananaNo
         )}
 
         {/* Google Search toggle - for Nano Banana Pro and Nano Banana 2 */}
-        {currentProvider === "gemini" && supportsResolution && (
+        {isNativeGoogleProvider && supportsResolution && (
           <label className="flex items-center gap-1.5 text-[10px] text-neutral-300 shrink-0 cursor-pointer">
             <input
               type="checkbox"
@@ -739,7 +743,7 @@ export function GenerateImageNode({ id, data, selected }: NodeProps<NanoBananaNo
           </label>
         )}
         {/* Image Search toggle - only for Nano Banana 2 */}
-        {currentProvider === "gemini" && currentModelId === "nano-banana-2" && (
+        {isNativeGoogleProvider && currentModelId === "nano-banana-2" && (
           <label className="flex items-center gap-1.5 text-[10px] text-neutral-300 shrink-0 cursor-pointer">
             <input
               type="checkbox"
