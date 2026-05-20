@@ -34,6 +34,25 @@ function getVertexConfig(request: Request): { project: string; location: string 
 }
 
 /**
+ * Some preview models are ONLY available in the "global" location on Vertex AI.
+ * Returns the effective location based on the model.
+ */
+function getEffectiveLocation(config: { project: string; location: string }, model: string): { project: string; location: string } {
+  // Preview models only support "global" location on Vertex AI
+  const GLOBAL_LOCATION_MODELS = [
+    "vertex/nano-banana-pro",             // gemini-3-pro-image-preview
+    "vertex/nano-banana-2",               // gemini-3.1-flash-image-preview
+    "vertex/veo-3.1/text-to-video",       // veo-3.1-generate-preview
+    "vertex/veo-3.1/image-to-video",      // veo-3.1-generate-preview
+    "vertex/veo-3.1-fast/text-to-video",  // veo-3.1-fast-generate-preview
+    "vertex/veo-3.1-fast/image-to-video", // veo-3.1-fast-generate-preview
+  ];
+
+  const effectiveLocation = GLOBAL_LOCATION_MODELS.includes(model) ? "global" : config.location;
+  return { project: config.project, location: effectiveLocation };
+}
+
+/**
  * Map Vertex AI model types to Gemini API model IDs
  * Model IDs include the vertex/ prefix for routing
  */
@@ -73,12 +92,13 @@ export async function generateWithVertex(
     return { data: image, mimeType: "image/png" };
   });
 
-  // Initialize Vertex AI client with Vertex AI auth
+  // Initialize Vertex AI client with model-aware location
   const vertexConfig = getVertexConfig(request);
+  const effectiveConfig = getEffectiveLocation(vertexConfig, model);
   const ai = new GoogleGenAI({
     vertexai: true,
-    project: vertexConfig.project,
-    location: vertexConfig.location,
+    project: effectiveConfig.project,
+    location: effectiveConfig.location,
   });
 
   // Build request parts array with prompt and all images
@@ -262,12 +282,13 @@ export async function generateWithVertexVideo(
 
   console.log(`[API:${requestId}] Vertex AI video generation - Model: ${apiModelId}, Prompt: ${prompt?.length || 0} chars, Images: ${images?.length || 0}`);
 
-  // Initialize Vertex AI client with Vertex AI auth
+  // Initialize Vertex AI client with model-aware location
   const vertexConfig = getVertexConfig(request);
+  const effectiveConfig = getEffectiveLocation(vertexConfig, modelId);
   const ai = new GoogleGenAI({
     vertexai: true,
-    project: vertexConfig.project,
-    location: vertexConfig.location,
+    project: effectiveConfig.project,
+    location: effectiveConfig.location,
   });
 
   // Build config from parameters
