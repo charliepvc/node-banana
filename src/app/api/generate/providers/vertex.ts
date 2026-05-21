@@ -39,13 +39,10 @@ function getVertexConfig(request: Request): { project: string; location: string 
  */
 function getEffectiveLocation(config: { project: string; location: string }, model: string): { project: string; location: string } {
   // Preview models only support "global" location on Vertex AI
+  // GA Veo models (veo-3.1-generate-001, veo-3.1-fast-generate-001) are regional (us-central1)
   const GLOBAL_LOCATION_MODELS = [
     "vertex/nano-banana-pro",             // gemini-3-pro-image-preview
     "vertex/nano-banana-2",               // gemini-3.1-flash-image-preview
-    "vertex/veo-3.1/text-to-video",       // veo-3.1-generate-preview
-    "vertex/veo-3.1/image-to-video",      // veo-3.1-generate-preview
-    "vertex/veo-3.1-fast/text-to-video",  // veo-3.1-fast-generate-preview
-    "vertex/veo-3.1-fast/image-to-video", // veo-3.1-fast-generate-preview
   ];
 
   const effectiveLocation = GLOBAL_LOCATION_MODELS.includes(model) ? "global" : config.location;
@@ -258,10 +255,10 @@ export async function generateWithVertex(
  * Map Vertex AI Veo model IDs to Gemini API model IDs
  */
 const VEO_MODEL_MAP: Record<string, string> = {
-  "vertex/veo-3.1/text-to-video": "veo-3.1-generate-preview",
-  "vertex/veo-3.1/image-to-video": "veo-3.1-generate-preview",
-  "vertex/veo-3.1-fast/text-to-video": "veo-3.1-fast-generate-preview",
-  "vertex/veo-3.1-fast/image-to-video": "veo-3.1-fast-generate-preview",
+  "vertex/veo-3.1/text-to-video": "veo-3.1-generate-001",
+  "vertex/veo-3.1/image-to-video": "veo-3.1-generate-001",
+  "vertex/veo-3.1-fast/text-to-video": "veo-3.1-fast-generate-001",
+  "vertex/veo-3.1-fast/image-to-video": "veo-3.1-fast-generate-001",
 };
 
 /**
