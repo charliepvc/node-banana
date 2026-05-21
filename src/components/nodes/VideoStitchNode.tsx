@@ -3,17 +3,18 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Handle, Position, NodeProps, Node } from "@xyflow/react";
 import { BaseNode } from "./BaseNode";
-import { useCommentNavigation } from "@/hooks/useCommentNavigation";
 import { useWorkflowStore } from "@/store/workflowStore";
 import { VideoStitchNodeData } from "@/types";
 import { checkEncoderSupport } from "@/hooks/useStitchVideos";
 import { useVideoBlobUrl } from "@/hooks/useVideoBlobUrl";
+import { useVideoAutoplay } from "@/hooks/useVideoAutoplay";
+import { useShowHandleLabels } from "@/hooks/useShowHandleLabels";
+import { HandleLabel } from "./HandleLabel";
 
 type VideoStitchNodeType = Node<VideoStitchNodeData, "videoStitch">;
 
 export function VideoStitchNode({ id, data, selected }: NodeProps<VideoStitchNodeType>) {
   const nodeData = data;
-  const commentNavigation = useCommentNavigation(id);
   const updateNodeData = useWorkflowStore((state) => state.updateNodeData);
   const edges = useWorkflowStore((state) => state.edges);
   const nodes = useWorkflowStore((state) => state.nodes);
@@ -22,6 +23,8 @@ export function VideoStitchNode({ id, data, selected }: NodeProps<VideoStitchNod
   const isRunning = useWorkflowStore((state) => state.isRunning);
   const removeEdge = useWorkflowStore((state) => state.removeEdge);
   const videoBlobUrl = useVideoBlobUrl(nodeData.outputVideo ?? null);
+  const videoAutoplayRef = useVideoAutoplay(id, selected);
+  const showLabels = useShowHandleLabels(selected);
 
   // Check encoder support on mount
   useEffect(() => {
@@ -253,7 +256,12 @@ export function VideoStitchNode({ id, data, selected }: NodeProps<VideoStitchNod
     setHoverClipId(null);
   }, [draggedClipId]);
 
-  const handlePointerUp = useCallback(() => {
+  const handlePointerUp = useCallback((e: React.PointerEvent) => {
+    // Always release pointer capture to prevent capture leak
+    try {
+      (e.target as HTMLElement).releasePointerCapture(e.pointerId);
+    } catch { /* element may have been removed */ }
+
     if (!draggedClipId || !hoverClipId || draggedClipId === hoverClipId) {
       setDraggedClipId(null);
       setHoverClipId(null);
@@ -307,16 +315,7 @@ export function VideoStitchNode({ id, data, selected }: NodeProps<VideoStitchNod
               isConnectable={true}
               style={{ top: `${topPercent}%` }}
             />
-            <div
-              className="absolute text-[10px] font-medium whitespace-nowrap pointer-events-none text-right"
-              style={{
-                right: `calc(100% + 8px)`,
-                top: `calc(${topPercent}% - 9px)`,
-                color: "rgb(96, 165, 250)",
-              }}
-            >
-              Video {index + 1}
-            </div>
+            <HandleLabel label={`Video ${index + 1}`} side="target" color="var(--handle-color-video)" top={`calc(${topPercent}% - 9px)`} visible={showLabels} />
           </React.Fragment>
         );
       })}
@@ -330,16 +329,7 @@ export function VideoStitchNode({ id, data, selected }: NodeProps<VideoStitchNod
         isConnectable={true}
         style={{ top: "90%", background: "rgb(167, 139, 250)" }}
       />
-      <div
-        className="absolute text-[10px] font-medium whitespace-nowrap pointer-events-none text-right"
-        style={{
-          right: `calc(100% + 8px)`,
-          top: "calc(90% - 18px)",
-          color: "rgb(167, 139, 250)",
-        }}
-      >
-        Audio
-      </div>
+      <HandleLabel label="Audio" side="target" color="rgb(167, 139, 250)" top="calc(90% - 18px)" visible={showLabels} />
 
       {/* Video output handle (right side) */}
       <Handle
@@ -349,16 +339,7 @@ export function VideoStitchNode({ id, data, selected }: NodeProps<VideoStitchNod
         data-handletype="video"
         isConnectable={true}
       />
-      <div
-        className="absolute text-[10px] font-medium whitespace-nowrap pointer-events-none"
-        style={{
-          left: `calc(100% + 8px)`,
-          top: "calc(50% - 9px)",
-          color: "rgb(96, 165, 250)",
-        }}
-      >
-        Output
-      </div>
+      <HandleLabel label="Output" side="source" color="var(--handle-color-video)" top="calc(50% - 9px)" visible={showLabels} />
     </>
   );
 
@@ -367,13 +348,7 @@ export function VideoStitchNode({ id, data, selected }: NodeProps<VideoStitchNod
     return (
       <BaseNode
         id={id}
-        title="Video Stitch"
-        customTitle={nodeData.customTitle}
-        comment={nodeData.comment}
-        onCustomTitleChange={(title) => updateNodeData(id, { customTitle: title || undefined })}
-        onCommentChange={(comment) => updateNodeData(id, { comment: comment || undefined })}
         selected={selected}
-        commentNavigation={commentNavigation ?? undefined}
         minWidth={500}
         minHeight={280}
       >
@@ -403,13 +378,7 @@ export function VideoStitchNode({ id, data, selected }: NodeProps<VideoStitchNod
     return (
       <BaseNode
         id={id}
-        title="Video Stitch"
-        customTitle={nodeData.customTitle}
-        comment={nodeData.comment}
-        onCustomTitleChange={(title) => updateNodeData(id, { customTitle: title || undefined })}
-        onCommentChange={(comment) => updateNodeData(id, { comment: comment || undefined })}
         selected={selected}
-        commentNavigation={commentNavigation ?? undefined}
         minWidth={500}
         minHeight={280}
       >
@@ -445,18 +414,12 @@ export function VideoStitchNode({ id, data, selected }: NodeProps<VideoStitchNod
   return (
     <BaseNode
       id={id}
-      title="Video Stitch"
-      customTitle={nodeData.customTitle}
-      comment={nodeData.comment}
-      onCustomTitleChange={(title) => updateNodeData(id, { customTitle: title || undefined })}
-      onCommentChange={(comment) => updateNodeData(id, { comment: comment || undefined })}
-      onRun={handleStitch}
       selected={selected}
       isExecuting={isRunning}
       hasError={nodeData.status === "error"}
-      commentNavigation={commentNavigation ?? undefined}
       minWidth={500}
       minHeight={280}
+      aspectFitMedia={nodeData.outputVideo}
     >
       {renderHandles()}
 
@@ -575,9 +538,9 @@ export function VideoStitchNode({ id, data, selected }: NodeProps<VideoStitchNod
         {nodeData.outputVideo && nodeData.status !== "loading" && (
           <div className="relative flex-1 min-h-0">
             <video
+              ref={videoAutoplayRef}
               src={videoBlobUrl ?? undefined}
               controls
-              autoPlay
               loop
               muted
               className="w-full h-full object-contain rounded"

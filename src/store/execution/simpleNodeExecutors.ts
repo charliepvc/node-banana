@@ -18,6 +18,7 @@ import type {
   WorkflowNode,
 } from "@/types";
 import type { NodeExecutionContext } from "./types";
+import { resolveTextSourcesThroughRouters } from "@/store/utils/connectedInputs";
 import { parseTextToArray } from "@/utils/arrayParser";
 import { parseVarTags } from "@/utils/parseVarTags";
 
@@ -109,11 +110,12 @@ export async function executePromptConstructor(ctx: NodeExecutionContext): Promi
     const edges = getEdges();
     const nodes = getNodes();
 
-    // Find all connected text nodes
-    const connectedTextNodes = edges
+    // Find all connected text nodes (resolving through routers)
+    const directTextNodes = edges
       .filter((e) => e.target === node.id && e.targetHandle === "text")
       .map((e) => nodes.find((n) => n.id === e.source))
       .filter((n): n is WorkflowNode => n !== undefined);
+    const connectedTextNodes = resolveTextSourcesThroughRouters(directTextNodes, nodes, edges);
 
     // Build variable map: named variables from Prompt nodes take precedence
     const variableMap: Record<string, string> = {};
@@ -288,18 +290,34 @@ export async function executeOutput(ctx: NodeExecutionContext): Promise<void> {
 }
 
 /**
- * OutputGallery node: accumulates images from upstream nodes.
+ * OutputGallery node: accumulates images and videos from upstream nodes.
  */
 export async function executeOutputGallery(ctx: NodeExecutionContext): Promise<void> {
-  const { node, getConnectedInputs, updateNodeData } = ctx;
-  const { images } = getConnectedInputs(node.id);
-  const galleryData = node.data as OutputGalleryNodeData;
-  const existing = new Set(galleryData.images || []);
-  const newImages = images.filter((img) => !existing.has(img));
+  const { node, getConnectedInputs, updateNodeData, getFreshNode } = ctx;
+  const { images, videos } = getConnectedInputs(node.id);
+  // Use fresh node data — the stale `node` from topological sort may be missing
+  // images pushed by appendOutputGalleryImage during upstream batch execution.
+  const freshNode = getFreshNode(node.id);
+  const freshData = (freshNode?.data ?? node.data) as OutputGalleryNodeData;
+  const galleryImages = freshData.images || [];
+  const galleryVideos = freshData.videos || [];
+
+  const updates: Partial<OutputGalleryNodeData> = {};
+
+  const existingImages = new Set(galleryImages);
+  const newImages = images.filter((img) => !existingImages.has(img));
   if (newImages.length > 0) {
-    updateNodeData(node.id, {
-      images: [...newImages, ...(galleryData.images || [])],
-    });
+    updates.images = [...newImages, ...galleryImages];
+  }
+
+  const existingVideos = new Set(galleryVideos);
+  const newVideos = videos.filter((v) => !existingVideos.has(v));
+  if (newVideos.length > 0) {
+    updates.videos = [...newVideos, ...galleryVideos];
+  }
+
+  if (Object.keys(updates).length > 0) {
+    updateNodeData(node.id, updates);
   }
 }
 
@@ -323,7 +341,9 @@ export async function executeRouter(ctx: NodeExecutionContext): Promise<void> {
   // Brief status flash to show execution occurred.
   ctx.updateNodeData(ctx.node.id, { status: "loading" });
   await new Promise(resolve => setTimeout(resolve, 50));
-  ctx.updateNodeData(ctx.node.id, { status: "complete" });
+  if (!ctx.signal?.aborted) {
+    ctx.updateNodeData(ctx.node.id, { status: "complete" });
+  }
 }
 
 /**
@@ -334,7 +354,9 @@ export async function executeSwitch(ctx: NodeExecutionContext): Promise<void> {
   // Disabled outputs are filtered during traversal.
   ctx.updateNodeData(ctx.node.id, { status: "loading" });
   await new Promise(resolve => setTimeout(resolve, 50));
-  ctx.updateNodeData(ctx.node.id, { status: "complete" });
+  if (!ctx.signal?.aborted) {
+    ctx.updateNodeData(ctx.node.id, { status: "complete" });
+  }
 }
 
 /**
@@ -345,7 +367,9 @@ export async function executeConditionalSwitch(ctx: NodeExecutionContext): Promi
   // Brief status flash to show execution occurred.
   ctx.updateNodeData(ctx.node.id, { status: "loading" });
   await new Promise(resolve => setTimeout(resolve, 50));
-  ctx.updateNodeData(ctx.node.id, { status: "complete" });
+  if (!ctx.signal?.aborted) {
+    ctx.updateNodeData(ctx.node.id, { status: "complete" });
+  }
 }
 
 /**

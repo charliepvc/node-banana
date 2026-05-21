@@ -7,6 +7,7 @@ import {
   VideoSampleSink,
   VideoSampleSource,
   AudioBufferSource,
+  AudioBufferSink,
   BlobSource,
   ALL_FORMATS,
   BufferTarget,
@@ -28,11 +29,12 @@ import {
 
 const determineEncodeParameters = async (
   blobs: Blob[]
-): Promise<{ width: number; height: number; rotation: Rotation; maxSourceBitrate: number; totalDuration: number }> => {
+): Promise<{ width: number; height: number; rotation: Rotation; maxSourceBitrate: number; totalDuration: number; probeSuccessCount: number }> => {
   let maxWidth = 0;
   let maxHeight = 0;
   let maxSourceBitrate = 0;
   let totalDuration = 0;
+  let probeSuccessCount = 0;
   let rotation: Rotation | null = null;
 
   for (let i = 0; i < blobs.length; i++) {
@@ -42,6 +44,7 @@ const determineEncodeParameters = async (
       maxHeight = Math.max(maxHeight, height);
       maxSourceBitrate = Math.max(maxSourceBitrate, bitrate);
       totalDuration += duration;
+      probeSuccessCount++;
       if (rotation === null) {
         rotation = trackRotation;
       } else if (trackRotation !== rotation) {
@@ -61,6 +64,7 @@ const determineEncodeParameters = async (
       rotation: rotation ?? (0 as Rotation),
       maxSourceBitrate,
       totalDuration,
+      probeSuccessCount,
     };
   }
 
@@ -70,6 +74,7 @@ const determineEncodeParameters = async (
     rotation: rotation ?? (0 as Rotation),
     maxSourceBitrate,
     totalDuration,
+    probeSuccessCount,
   };
 };
 
@@ -174,6 +179,7 @@ export async function stitchVideosAsync(
       rotation: aggregateRotation,
       maxSourceBitrate,
       totalDuration: probedVideoDuration,
+      probeSuccessCount,
     } = await determineEncodeParameters(videoBlobs);
 
     const safeWidth = probedWidth > 0 ? probedWidth : FALLBACK_WIDTH;
@@ -211,6 +217,101 @@ export async function stitchVideosAsync(
       rotation: aggregateRotation,
     });
 
+    // Extract embedded audio from source videos when no external audio override is provided
+    let effectiveAudioData = audioData ?? null;
+    if (!effectiveAudioData) {
+      updateProgress('processing', 'Extracting audio from source videos...', 8);
+      // Per-clip audio: each entry is either extracted buffers or a pending
+      // duration (seconds) for clips before the reference format is known.
+      const perClipAudio: Array<{ buffers: AudioBuffer[] } | { silentDuration: number }> = [];
+      let referenceSampleRate: number | null = null;
+      let referenceChannels: number | null = null;
+
+      for (let i = 0; i < videoBlobs.length; i++) {
+        try {
+          const blobSource = new BlobSource(videoBlobs[i]);
+          const input = new Input({ source: blobSource, formats: ALL_FORMATS });
+          let extractedAudio = false;
+          try {
+            const clipDuration = await input.computeDuration();
+            const audioTracks = await input.getAudioTracks();
+            if (audioTracks.length > 0) {
+              const audioTrack = audioTracks[0];
+              const sink = new AudioBufferSink(audioTrack);
+              const clipBuffers: AudioBuffer[] = [];
+              for await (const wrapped of sink.buffers(0, clipDuration)) {
+                if (referenceSampleRate === null) {
+                  referenceSampleRate = wrapped.buffer.sampleRate;
+                  referenceChannels = wrapped.buffer.numberOfChannels;
+                }
+                if (
+                  wrapped.buffer.sampleRate === referenceSampleRate &&
+                  wrapped.buffer.numberOfChannels === referenceChannels
+                ) {
+                  clipBuffers.push(wrapped.buffer);
+                  extractedAudio = true;
+                }
+              }
+              if (extractedAudio) {
+                perClipAudio.push({ buffers: clipBuffers });
+              }
+            }
+            // If no audio was extracted, record the clip's duration so we can
+            // insert silence later (even before the reference format is known).
+            if (!extractedAudio && clipDuration > 0) {
+              perClipAudio.push({ silentDuration: clipDuration });
+            }
+          } finally {
+            input.dispose();
+          }
+        } catch (err) {
+          console.warn(`Failed to extract audio from video ${i + 1}:`, err);
+        }
+      }
+
+      // Build the final concatenated buffer, resolving deferred silent entries
+      // now that the reference format is established.
+      if (referenceSampleRate && referenceChannels) {
+        const allAudioBuffers: AudioBuffer[] = [];
+        for (const entry of perClipAudio) {
+          if ('buffers' in entry) {
+            allAudioBuffers.push(...entry.buffers);
+          } else {
+            // Deferred silent clip — create a silent buffer with the reference format
+            const silentSamples = Math.max(1, Math.floor(entry.silentDuration * referenceSampleRate));
+            const silentBuffer = new AudioBuffer({
+              length: silentSamples,
+              numberOfChannels: referenceChannels,
+              sampleRate: referenceSampleRate,
+            });
+            allAudioBuffers.push(silentBuffer);
+          }
+        }
+
+        if (allAudioBuffers.length > 0) {
+          const totalSamples = allAudioBuffers.reduce((sum, b) => sum + b.length, 0);
+          const concatenated = new AudioBuffer({
+            length: Math.max(1, totalSamples),
+            numberOfChannels: referenceChannels,
+            sampleRate: referenceSampleRate,
+          });
+
+          let offset = 0;
+          for (const buffer of allAudioBuffers) {
+            for (let ch = 0; ch < referenceChannels; ch++) {
+              concatenated.getChannelData(ch).set(buffer.getChannelData(ch), offset);
+            }
+            offset += buffer.length;
+          }
+
+          effectiveAudioData = {
+            buffer: concatenated,
+            duration: totalSamples / referenceSampleRate,
+          };
+        }
+      }
+    }
+
     // Create output
     updateProgress('processing', 'Creating output container...', 10);
 
@@ -226,19 +327,19 @@ export async function stitchVideosAsync(
 
     output.addVideoTrack(videoSource, { rotation: aggregateRotation, frameRate: MAX_OUTPUT_FPS });
 
-    // Add audio track if provided
+    // Add audio track if provided (external audio input or extracted from source videos)
     let audioSource: AudioBufferSource | null = null;
     let pendingAudioBuffer: AudioBuffer | null = null;
     let outputStarted = false;
 
-    if (audioData) {
-      updateProgress('processing', 'Detecting supported audio codec...', 8);
+    if (effectiveAudioData) {
+      updateProgress('processing', 'Detecting supported audio codec...', 11);
 
       // Detect the best supported audio codec for MP4
       // Try common codecs in order of preference: aac, mp3 (no opus - Twitter doesn't support it)
       const audioCodec = await getFirstEncodableAudioCodec(['aac', 'mp3'], {
-        numberOfChannels: audioData.buffer.numberOfChannels,
-        sampleRate: audioData.buffer.sampleRate,
+        numberOfChannels: effectiveAudioData.buffer.numberOfChannels,
+        sampleRate: effectiveAudioData.buffer.sampleRate,
         bitrate: 128000,
       });
 
@@ -255,7 +356,7 @@ export async function stitchVideosAsync(
         });
 
         output.addAudioTrack(audioSource);
-        pendingAudioBuffer = audioData.buffer;
+        pendingAudioBuffer = effectiveAudioData.buffer;
       }
     }
 
@@ -267,7 +368,10 @@ export async function stitchVideosAsync(
     // Writing audio after all video causes broken interleaving (Discord won't play audio).
     if (audioSource && pendingAudioBuffer) {
       updateProgress('processing', 'Encoding audio track...', 12);
-      const trimTarget = probedVideoDuration > 0 ? probedVideoDuration : audioData!.duration;
+      // Only trust probedVideoDuration when all blobs were successfully probed;
+      // a partial sum would prematurely trim the audio track.
+      const allProbed = probeSuccessCount === videoBlobs.length;
+      const trimTarget = allProbed && probedVideoDuration > 0 ? probedVideoDuration : effectiveAudioData!.duration;
       const trimmedBuffer = trimAudioBuffer(pendingAudioBuffer, trimTarget);
       await audioSource.add(trimmedBuffer);
       await audioSource.close();

@@ -3,6 +3,7 @@ import {
   ModelType,
   ImageInputNodeData,
   AudioInputNodeData,
+  VideoInputNodeData,
   AnnotationNodeData,
   PromptNodeData,
   ArrayNodeData,
@@ -37,9 +38,10 @@ import { loadGenerateImageDefaults, loadNodeDefaults } from "./localStorage";
 export const defaultNodeDimensions: Record<NodeType, { width: number; height: number }> = {
   imageInput: { width: 300, height: 280 },
   audioInput: { width: 300, height: 200 },
+  videoInput: { width: 300, height: 280 },
   annotation: { width: 300, height: 280 },
   prompt: { width: 320, height: 220 },
-  array: { width: 360, height: 360 },
+  array: { width: 340, height: 260 },
   promptConstructor: { width: 340, height: 280 },
   nanoBanana: { width: 300, height: 300 },
   generateVideo: { width: 300, height: 300 },
@@ -51,7 +53,7 @@ export const defaultNodeDimensions: Record<NodeType, { width: number; height: nu
   outputGallery: { width: 320, height: 360 },
   imageCompare: { width: 400, height: 360 },
   videoStitch: { width: 400, height: 280 },
-  easeCurve: { width: 340, height: 480 },
+  easeCurve: { width: 340, height: 280 },
   videoTrim: { width: 360, height: 360 },
   videoFrameGrab: { width: 320, height: 320 },
   router: { width: 200, height: 80 },
@@ -97,6 +99,14 @@ export const createDefaultNodeData = (type: NodeType): WorkflowNodeData => {
         duration: null,
         format: null,
       } as AudioInputNodeData;
+    case "videoInput":
+      return {
+        video: null,
+        filename: null,
+        duration: null,
+        dimensions: null,
+        format: null,
+      } as VideoInputNodeData;
     case "annotation":
       return {
         sourceImage: null,
@@ -115,6 +125,7 @@ export const createDefaultNodeData = (type: NodeType): WorkflowNodeData => {
         regexPattern: "",
         trimItems: true,
         removeEmpty: true,
+        batchMode: false,
         selectedOutputIndex: null,
         outputItems: [],
         outputText: "[]",
@@ -247,6 +258,7 @@ export const createDefaultNodeData = (type: NodeType): WorkflowNodeData => {
     case "outputGallery":
       return {
         images: [],
+        videos: [],
       } as OutputGalleryNodeData;
     case "imageCompare":
       return {

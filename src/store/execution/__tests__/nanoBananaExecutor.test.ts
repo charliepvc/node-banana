@@ -345,4 +345,43 @@ describe("executeNanoBanana", () => {
 
     expect(ctx.appendOutputGalleryImage).toHaveBeenCalledWith("gal-1", "data:image/png;base64,result");
   });
+
+  it("falls back on primary failure and stamps metadata", async () => {
+    const node = makeNode({
+      fallbackModel: {
+        provider: "replicate",
+        modelId: "flux-dev",
+        displayName: "Flux Dev",
+      },
+    });
+
+    // Primary fails, fallback succeeds
+    mockFetch
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ success: false, error: "Primary boom" }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ success: true, image: "data:image/png;base64,fallback" }),
+      });
+
+    const ctx = makeCtx(node);
+    await executeNanoBanana(ctx);
+
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+
+    // Second fetch should carry the fallback model
+    const secondBody = JSON.parse(mockFetch.mock.calls[1][1].body);
+    expect(secondBody.selectedModel.modelId).toBe("flux-dev");
+
+    // Metadata stamp should be present in the final updateNodeData call
+    const calls = (ctx.updateNodeData as ReturnType<typeof vi.fn>).mock.calls;
+    const stampCall = calls.find(
+      (c: unknown[]) => (c[1] as Record<string, unknown>).__usedFallback === true
+    );
+    expect(stampCall).toBeDefined();
+    expect((stampCall![1] as Record<string, unknown>).__fallbackModelUsed).toBe("Flux Dev");
+    expect((stampCall![1] as Record<string, unknown>).__primaryError).toBe("Primary boom");
+  });
 });

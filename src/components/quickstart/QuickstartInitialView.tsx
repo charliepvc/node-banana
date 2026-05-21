@@ -28,7 +28,7 @@ export function QuickstartInitialView({
           </div>
 
           <p className="text-sm text-neutral-400 leading-relaxed mb-6">
-            A node based workflow editor for AI image generation. Connect nodes to build pipelines that transform and generate images.
+            A node based workflow editor for generative AI pipelines. Connect nodes to build pipelines that transform and generate images, video, audio and 3D assets.
           </p>
 
           <div className="flex flex-col gap-2.5 mt-auto">
@@ -82,6 +82,15 @@ export function QuickstartInitialView({
                 <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
               </svg>
               Willie
+            </a>
+            <a
+              href="https://nodebananapro.com"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-2 text-sm text-neutral-400 hover:text-neutral-200 transition-colors"
+            >
+              <img src="/banana_icon.png" alt="" className="w-4 h-4" />
+              NB Pro Waitlist
             </a>
           </div>
         </div>
@@ -140,6 +149,7 @@ export function QuickstartInitialView({
             description="Get Gemini to build it"
             badge="Beta"
           />
+
         </div>
       </div>
     </div>

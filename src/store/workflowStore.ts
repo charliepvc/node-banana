@@ -26,10 +26,12 @@ import {
   MatchMode,
   MODEL_DISPLAY_NAMES,
 } from "@/types";
+import { UndoManager, UndoSnapshot, clonePreservingStrings } from "./undoHistory";
 import { useToast } from "@/components/Toast";
 import { logger } from "@/utils/logger";
-import { externalizeWorkflowImages, hydrateWorkflowImages } from "@/utils/imageStorage";
+import { externalizeWorkflowMedia, hydrateWorkflowMedia } from "@/utils/mediaStorage";
 import { EditOperation, applyEditOperations as executeEditOps } from "@/lib/chat/editOperations";
+import { findNearestFreePosition } from "@/utils/spatialLayout";
 import {
   loadSaveConfigs,
   saveSaveConfig,
@@ -58,8 +60,10 @@ import {
   groupNodesByLevel,
   chunk,
   clearNodeImageRefs,
+  findLoopSubgraph,
+  copyLoopOutput,
 } from "./utils/executionUtils";
-import { getConnectedInputsPure, validateWorkflowPure } from "./utils/connectedInputs";
+import { getConnectedInputsPure, validateWorkflowPure, type ConnectedInputs } from "./utils/connectedInputs";
 import { evaluateRule } from "./utils/ruleEvaluation";
 import { computeDimmedNodes } from "./utils/dimmingUtils";
 import {
@@ -84,6 +88,7 @@ import {
   executeRouter,
   executeSwitch,
   executeConditionalSwitch,
+  runBatchIfApplicable,
 } from "./execution";
 import type { NodeExecutionContext } from "./execution";
 export type { LevelGroup } from "./utils/executionUtils";
@@ -95,7 +100,7 @@ export { CONCURRENCY_SETTINGS_KEY } from "./utils/executionUtils";
 async function evaluateAndExecuteConditionalSwitch(
   node: WorkflowNode,
   executionCtx: NodeExecutionContext,
-  getConnectedInputs: (nodeId: string) => { text: string | null; images: string[]; videos: string[]; audio: string[]; model3d: string | null; dynamicInputs: Record<string, string | string[]>; easeCurve: { bezierHandles: [number, number, number, number]; easingPreset: string | null } | null },
+  getConnectedInputs: (nodeId: string) => ConnectedInputs,
   updateNodeData: (nodeId: string, data: Partial<WorkflowNodeData>) => void,
 ): Promise<void> {
   const condInputs = getConnectedInputs(node.id);
@@ -143,6 +148,10 @@ function buildConnectionEdgeData(
   // Array node uses a single output handle; assign each edge a stable item index.
   if (sourceNode?.type === "array" && (connection.sourceHandle || "text") === "text") {
     const sourceData = sourceNode.data as Record<string, unknown>;
+
+    // Batch mode is now derived dynamically in connectedInputs.ts from
+    // the source node's batchMode — no need to stamp edge metadata.
+
     const selectedIndex = sourceData.selectedOutputIndex;
     const outputItems = Array.isArray(sourceData.outputItems) ? sourceData.outputItems : [];
     const outputCount = outputItems.length;
@@ -208,6 +217,12 @@ interface WorkflowStore {
   clipboard: ClipboardData | null;
   groups: Record<string, NodeGroup>;
 
+  // Undo/Redo
+  canUndo: boolean;
+  canRedo: boolean;
+  undo: () => void;
+  redo: () => void;
+
   // Settings
   setEdgeStyle: (style: EdgeStyle) => void;
 
@@ -223,6 +238,7 @@ interface WorkflowStore {
   addEdgeWithType: (connection: Connection, edgeType: string, edgeDataOverrides?: Record<string, unknown>) => void;
   removeEdge: (edgeId: string) => void;
   toggleEdgePause: (edgeId: string) => void;
+  setLoopCount: (edgeId: string, count: number) => void;
 
   // Copy/Paste operations
   copySelectedNodes: () => void;
@@ -243,9 +259,11 @@ interface WorkflowStore {
   openModalCount: number;
   isModalOpen: boolean;
   showQuickstart: boolean;
+  hoveredNodeId: string | null;
   incrementModalCount: () => void;
   decrementModalCount: () => void;
   setShowQuickstart: (show: boolean) => void;
+  setHoveredNodeId: (id: string | null) => void;
 
   // Execution
   isRunning: boolean;
@@ -258,6 +276,7 @@ interface WorkflowStore {
   regenerateNode: (nodeId: string) => Promise<void>;
   executeSelectedNodes: (nodeIds: string[]) => Promise<void>;
   stopWorkflow: () => void;
+  mockTutorialExecution: () => Promise<void>;
   setMaxConcurrentCalls: (value: number) => void;
 
   // Save/Load
@@ -267,7 +286,7 @@ interface WorkflowStore {
 
   // Helpers
   getNodeById: (id: string) => WorkflowNode | undefined;
-  getConnectedInputs: (nodeId: string) => { images: string[]; videos: string[]; audio: string[]; model3d: string | null; text: string | null; dynamicInputs: Record<string, string | string[]>; easeCurve: { bezierHandles: [number, number, number, number]; easingPreset: string | null } | null };
+  getConnectedInputs: (nodeId: string) => ConnectedInputs;
   validateWorkflow: () => { valid: boolean; errors: string[] };
 
   // Global Image History
@@ -371,6 +390,9 @@ interface WorkflowStore {
   // Switch dimming state
   dimmedNodeIds: Set<string>;
 
+  // Skip propagation state (optional empty inputs)
+  skippedNodeIds: Set<string>;
+
   // Switch dimming actions
   recomputeDimmedNodes: () => void;
 
@@ -379,6 +401,25 @@ interface WorkflowStore {
 let nodeIdCounter = 0;
 let groupIdCounter = 0;
 let autoSaveIntervalId: ReturnType<typeof setInterval> | null = null;
+
+// Undo/redo state (module-level, not in Zustand to avoid serialization)
+const undoManager = new UndoManager();
+let isDragging = false;
+let pendingDataSnapshot: UndoSnapshot | null = null;
+let dataChangeTimer: ReturnType<typeof setTimeout> | null = null;
+// When true, a remove-checkpoint was already pushed in the current React Flow
+// deleteElements cycle.  React Flow v12 fires onEdgesChange(remove) BEFORE
+// onNodesChange(remove) — both happen synchronously inside the same microtask
+// after an internal `await`.  The flag is set by whichever handler fires first
+// and checked by the second so only ONE checkpoint is recorded.  It is also
+// checked by updateNodeData to suppress debounced snapshots from side-effects
+// like clearStaleInputImages.  Cleared via setTimeout(0) (macrotask) so it
+// survives all microtasks / Promise continuations in the current event-loop turn.
+let deleteCheckpointActive = false;
+
+// RAF debounce for hover updates — coalesces rapid mouseenter/mouseleave events
+// into a single store update per animation frame
+let hoverRafId: number | null = null;
 
 // Track pending save-generation syncs to ensure IDs are resolved before workflow save
 const pendingImageSyncs = new Map<string, Promise<void>>();
@@ -441,6 +482,45 @@ function clearStaleInputImages(
   }
 }
 
+/** Capture current undoable state as a deep-cloned snapshot */
+function captureUndoSnapshot(state: WorkflowStore): UndoSnapshot {
+  const cloned = clonePreservingStrings({
+    nodes: state.nodes,
+    edges: state.edges,
+    groups: state.groups,
+    edgeStyle: state.edgeStyle,
+  }) as UndoSnapshot;
+  // Strip transient selection state from cloned nodes
+  for (const node of cloned.nodes) {
+    delete (node as Record<string, unknown>).selected;
+  }
+  return cloned;
+}
+
+/** Flush pending debounced data snapshot, capture current state, push to undoManager */
+function pushUndoCheckpoint(
+  get: () => WorkflowStore,
+  set: (partial: Partial<WorkflowStore>) => void,
+): void {
+  // Flush any pending debounced data snapshot first
+  if (pendingDataSnapshot) {
+    undoManager.push(pendingDataSnapshot);
+    pendingDataSnapshot = null;
+    if (dataChangeTimer) {
+      clearTimeout(dataChangeTimer);
+      dataChangeTimer = null;
+    }
+  }
+  const snapshot = captureUndoSnapshot(get());
+  undoManager.push(snapshot);
+  set({ canUndo: undoManager.canUndo, canRedo: undoManager.canRedo });
+}
+
+/** Update reactive canUndo/canRedo flags */
+function syncUndoFlags(set: (partial: Partial<WorkflowStore>) => void): void {
+  set({ canUndo: undoManager.canUndo, canRedo: undoManager.canRedo });
+}
+
 const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
   nodes: [],
   edges: [],
@@ -450,6 +530,7 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
   openModalCount: 0,
   isModalOpen: false,
   showQuickstart: true,
+  hoveredNodeId: null,
   isRunning: false,
   currentNodeIds: [],  // Changed from currentNodeId for parallel execution
   pausedAtNodeId: null,
@@ -500,7 +581,65 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
   // Switch dimming initial state
   dimmedNodeIds: new Set<string>(),
 
+  // Skip propagation initial state
+  skippedNodeIds: new Set<string>(),
+
+  // Undo/Redo initial state
+  canUndo: false,
+  canRedo: false,
+
+  undo: () => {
+    // Flush any pending debounced data snapshot so the pre-edit state is preserved
+    if (pendingDataSnapshot) {
+      undoManager.push(pendingDataSnapshot);
+      pendingDataSnapshot = null;
+      if (dataChangeTimer) {
+        clearTimeout(dataChangeTimer);
+        dataChangeTimer = null;
+      }
+    }
+    const current = captureUndoSnapshot(get());
+    const previous = undoManager.undo(current);
+    if (previous) {
+      set({
+        nodes: previous.nodes,
+        edges: previous.edges,
+        groups: previous.groups,
+        edgeStyle: previous.edgeStyle,
+        hasUnsavedChanges: true,
+      });
+      get().recomputeDimmedNodes();
+    }
+    syncUndoFlags(set);
+  },
+
+  redo: () => {
+    // Flush any pending debounced data snapshot so the pre-edit state is preserved
+    if (pendingDataSnapshot) {
+      undoManager.push(pendingDataSnapshot);
+      pendingDataSnapshot = null;
+      if (dataChangeTimer) {
+        clearTimeout(dataChangeTimer);
+        dataChangeTimer = null;
+      }
+    }
+    const current = captureUndoSnapshot(get());
+    const next = undoManager.redo(current);
+    if (next) {
+      set({
+        nodes: next.nodes,
+        edges: next.edges,
+        groups: next.groups,
+        edgeStyle: next.edgeStyle,
+        hasUnsavedChanges: true,
+      });
+      get().recomputeDimmedNodes();
+    }
+    syncUndoFlags(set);
+  },
+
   setEdgeStyle: (style: EdgeStyle) => {
+    pushUndoCheckpoint(get, set);
     set({ edgeStyle: style });
   },
 
@@ -522,10 +661,22 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
     set({ showQuickstart: show });
   },
 
+  setHoveredNodeId: (id: string | null) => {
+    if (hoverRafId !== null) cancelAnimationFrame(hoverRafId);
+    hoverRafId = requestAnimationFrame(() => {
+      hoverRafId = null;
+      if (get().hoveredNodeId !== id) set({ hoveredNodeId: id });
+    });
+  },
+
   addNode: (type: NodeType, position: XYPosition, initialData?: Partial<WorkflowNodeData>) => {
     const id = `${type}-${++nodeIdCounter}`;
 
     const { width, height } = defaultNodeDimensions[type];
+
+    // Find collision-free position
+    const state = get();
+    const finalPosition = findNearestFreePosition(position, type, state.nodes);
 
     // Merge default data with initialData if provided
     const defaultData = createDefaultNodeData(type);
@@ -536,11 +687,12 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
     const newNode: WorkflowNode = {
       id,
       type,
-      position,
+      position: finalPosition,
       data: nodeData,
       style: { width, height },
     };
 
+    pushUndoCheckpoint(get, set);
     set((state) => ({
       nodes: [...state.nodes, newNode],
       hasUnsavedChanges: true,
@@ -553,6 +705,24 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
 
   updateNodeData: (nodeId: string, data: Partial<WorkflowNodeData>) => {
     const node = get().nodes.find((n) => n.id === nodeId);
+
+    // Debounced undo tracking: skip during execution and during node/edge deletion
+    // (clearStaleInputImages calls updateNodeData as a side effect of deletion)
+    if (!get().isRunning && !deleteCheckpointActive) {
+      if (!pendingDataSnapshot) {
+        pendingDataSnapshot = captureUndoSnapshot(get());
+      }
+      if (dataChangeTimer) clearTimeout(dataChangeTimer);
+      dataChangeTimer = setTimeout(() => {
+        if (pendingDataSnapshot) {
+          undoManager.push(pendingDataSnapshot);
+          pendingDataSnapshot = null;
+          syncUndoFlags(set);
+        }
+        dataChangeTimer = null;
+      }, 500);
+    }
+
     set((state) => ({
       nodes: state.nodes.map((node) =>
         node.id === nodeId
@@ -571,6 +741,7 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
   },
 
   removeNode: (nodeId: string) => {
+    pushUndoCheckpoint(get, set);
     set((state) => ({
       nodes: state.nodes.filter((node) => node.id !== nodeId),
       edges: state.edges.filter(
@@ -589,6 +760,30 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
     // Track manual changes only for remove operations (not position/selection/dimensions)
     const hasRemoveChange = changes.some((c) => c.type === "remove");
 
+    // Undo: capture snapshot on drag start
+    const hasDragStart = changes.some(
+      (c) => c.type === "position" && (c as { dragging?: boolean }).dragging === true
+    );
+    const hasDragEnd = changes.some(
+      (c) => c.type === "position" && (c as { dragging?: boolean }).dragging === false
+    );
+    if (hasDragStart && !isDragging) {
+      isDragging = true;
+      pushUndoCheckpoint(get, set);
+    }
+    if (hasDragEnd && isDragging) {
+      isDragging = false;
+    }
+
+    // Undo: capture snapshot before node removal — but skip if onEdgesChange
+    // already pushed a checkpoint in this same deleteElements cycle
+    // (React Flow v12 fires edge removals BEFORE node removals).
+    if (hasRemoveChange && !deleteCheckpointActive) {
+      pushUndoCheckpoint(get, set);
+      deleteCheckpointActive = true;
+      setTimeout(() => { deleteCheckpointActive = false; }, 0);
+    }
+
     set((state) => ({
       nodes: applyNodeChanges(changes, state.nodes),
       ...(hasMeaningfulChange ? { hasUnsavedChanges: true } : {}),
@@ -605,6 +800,16 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
     // Track manual changes only for remove operations (not selection)
     const hasRemoveChange = changes.some((c) => c.type === "remove");
     const hasAddOrRemove = changes.some((c) => c.type === "add" || c.type === "remove");
+
+    // Undo: capture snapshot before edge removal — but skip if a checkpoint
+    // was already pushed in this same React Flow deleteElements cycle.
+    // React Flow v12 fires onEdgesChange(remove) BEFORE onNodesChange(remove),
+    // so this is typically the first handler to set the flag.
+    if (hasRemoveChange && !deleteCheckpointActive) {
+      pushUndoCheckpoint(get, set);
+      deleteCheckpointActive = true;
+      setTimeout(() => { deleteCheckpointActive = false; }, 0);
+    }
 
     // Capture removed edges before applyEdgeChanges removes them
     let removedEdges: WorkflowEdge[] = [];
@@ -632,6 +837,7 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
   },
 
   onConnect: (connection: Connection, edgeDataOverrides?: Record<string, unknown>) => {
+    pushUndoCheckpoint(get, set);
     set((state) => {
       const baseData = buildConnectionEdgeData(connection, state.nodes, state.edges);
       const newEdge = {
@@ -650,6 +856,7 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
   },
 
   addEdgeWithType: (connection: Connection, edgeType: string, edgeDataOverrides?: Record<string, unknown>) => {
+    pushUndoCheckpoint(get, set);
     set((state) => {
       const baseData = buildConnectionEdgeData(connection, state.nodes, state.edges);
       const newEdge = {
@@ -666,20 +873,42 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
   },
 
   removeEdge: (edgeId: string) => {
+    pushUndoCheckpoint(get, set);
     const removedEdge = get().edges.find((e) => e.id === edgeId);
     set((state) => ({
       edges: state.edges.filter((edge) => edge.id !== edgeId),
       hasUnsavedChanges: true,
     }));
-    if (removedEdge) clearStaleInputImages([removedEdge], get);
+    if (removedEdge) {
+      deleteCheckpointActive = true;
+      try {
+        clearStaleInputImages([removedEdge], get);
+      } finally {
+        deleteCheckpointActive = false;
+      }
+    }
     get().incrementManualChangeCount();
   },
 
   toggleEdgePause: (edgeId: string) => {
+    pushUndoCheckpoint(get, set);
     set((state) => ({
       edges: state.edges.map((edge) =>
         edge.id === edgeId
           ? { ...edge, data: { ...edge.data, hasPause: !edge.data?.hasPause } }
+          : edge
+      ),
+      hasUnsavedChanges: true,
+    }));
+  },
+
+  setLoopCount: (edgeId: string, count: number) => {
+    const clamped = Math.max(1, Math.min(100, count));
+    pushUndoCheckpoint(get, set);
+    set((state) => ({
+      edges: state.edges.map((edge) =>
+        edge.id === edgeId
+          ? { ...edge, data: { ...edge.data, loopCount: clamped } }
           : edge
       ),
       hasUnsavedChanges: true,
@@ -700,8 +929,8 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
     );
 
     // Deep clone the nodes and edges to avoid reference issues
-    const clonedNodes = JSON.parse(JSON.stringify(selectedNodes)) as WorkflowNode[];
-    const clonedEdges = JSON.parse(JSON.stringify(connectedEdges)) as WorkflowEdge[];
+    const clonedNodes = clonePreservingStrings(selectedNodes) as WorkflowNode[];
+    const clonedEdges = clonePreservingStrings(connectedEdges) as WorkflowEdge[];
 
     set({ clipboard: { nodes: clonedNodes, edges: clonedEdges } });
   },
@@ -710,6 +939,8 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
     const { clipboard, nodes, edges } = get();
 
     if (!clipboard || clipboard.nodes.length === 0) return;
+
+    pushUndoCheckpoint(get, set);
 
     // Create a mapping from old node IDs to new node IDs
     const idMapping = new Map<string, string>();
@@ -721,16 +952,25 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
     });
 
     // Create new nodes with updated IDs and offset positions
-    const newNodes: WorkflowNode[] = clipboard.nodes.map((node) => ({
-      ...node,
-      id: idMapping.get(node.id)!,
-      position: {
-        x: node.position.x + offset.x,
-        y: node.position.y + offset.y,
-      },
-      selected: true, // Select newly pasted nodes
-      data: JSON.parse(JSON.stringify(node.data)),
-    }));
+    const newNodes: WorkflowNode[] = clipboard.nodes.map((node) => {
+      const defaults = defaultNodeDimensions[node.type as NodeType] || { width: 300, height: 280 };
+      return {
+        ...node,
+        id: idMapping.get(node.id)!,
+        position: {
+          x: node.position.x + offset.x,
+          y: node.position.y + offset.y,
+        },
+        selected: true, // Select newly pasted nodes
+        // Reset height to defaults so BaseNode's ResizeObserver
+        // can correctly add settings panel height from the right baseline
+        style: { width: node.style?.width ?? defaults.width, height: defaults.height },
+        width: undefined,
+        height: undefined,
+        measured: undefined,
+        data: clonePreservingStrings(node.data),
+      };
+    });
 
     // Create new edges with updated source/target IDs
     const newEdges: WorkflowEdge[] = clipboard.edges.map((edge) => ({
@@ -777,6 +1017,8 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
 
     if (nodeIds.length === 0) return "";
 
+    pushUndoCheckpoint(get, set);
+
     // Get the nodes to group
     const nodesToGroup = nodes.filter((n) => nodeIds.includes(n.id));
     if (nodesToGroup.length === 0) return "";
@@ -797,7 +1039,6 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
 
     // Add padding around nodes
     const padding = 20;
-    const headerHeight = 32; // Match HEADER_HEIGHT in GroupsOverlay
 
     // Find next available color
     const usedColors = new Set(Object.values(groups).map((g) => g.color));
@@ -820,11 +1061,11 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
       color,
       position: {
         x: minX - padding,
-        y: minY - padding - headerHeight
+        y: minY - padding,
       },
       size: {
         width: maxX - minX + padding * 2,
-        height: maxY - minY + padding * 2 + headerHeight,
+        height: maxY - minY + padding * 2,
       },
     };
 
@@ -841,6 +1082,7 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
   },
 
   deleteGroup: (groupId: string) => {
+    pushUndoCheckpoint(get, set);
     set((state) => {
       const { [groupId]: _, ...remainingGroups } = state.groups;
       return {
@@ -854,6 +1096,7 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
   },
 
   addNodesToGroup: (nodeIds: string[], groupId: string) => {
+    pushUndoCheckpoint(get, set);
     set((state) => ({
       nodes: state.nodes.map((node) =>
         nodeIds.includes(node.id) ? { ...node, groupId } : node
@@ -863,6 +1106,7 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
   },
 
   removeNodesFromGroup: (nodeIds: string[]) => {
+    pushUndoCheckpoint(get, set);
     set((state) => ({
       nodes: state.nodes.map((node) =>
         nodeIds.includes(node.id) ? { ...node, groupId: undefined } : node
@@ -872,6 +1116,7 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
   },
 
   updateGroup: (groupId: string, updates: Partial<NodeGroup>) => {
+    pushUndoCheckpoint(get, set);
     set((state) => ({
       groups: {
         ...state.groups,
@@ -882,6 +1127,7 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
   },
 
   toggleGroupLock: (groupId: string) => {
+    pushUndoCheckpoint(get, set);
     set((state) => ({
       groups: {
         ...state.groups,
@@ -975,7 +1221,15 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
     // Create AbortController for this execution run
     const abortController = new AbortController();
     const isResuming = startFromNodeId === get().pausedAtNodeId;
-    set({ isRunning: true, pausedAtNodeId: null, currentNodeIds: [], _abortController: abortController });
+    const resetSkippedNodes = () => {
+      for (const skippedId of get().skippedNodeIds) {
+        const skippedNode = get().nodes.find((n) => n.id === skippedId);
+        if (skippedNode && (skippedNode.data as Record<string, unknown>).status !== undefined) {
+          get().updateNodeData(skippedId, { status: "idle" } as Partial<WorkflowNodeData>);
+        }
+      }
+    };
+    set({ isRunning: true, pausedAtNodeId: null, currentNodeIds: [], skippedNodeIds: new Set(), _abortController: abortController });
 
     // Start logging session
     await logger.startSession();
@@ -987,16 +1241,6 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
       isResuming,
       maxConcurrentCalls,
     });
-
-    // Group nodes by level for parallel execution
-    const levels = groupNodesByLevel(nodes, edges);
-
-    // Find starting level if startFromNodeId specified
-    let startLevel = 0;
-    if (startFromNodeId) {
-      const foundLevel = levels.findIndex((l) => l.nodeIds.includes(startFromNodeId));
-      if (foundLevel !== -1) startLevel = foundLevel;
-    }
 
     // Helper to execute a single node - returns true if successful, throws on error
     const executeSingleNode = async (node: WorkflowNode, signal: AbortSignal): Promise<void> => {
@@ -1048,12 +1292,49 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
         return; // Skip this node but continue with others
       }
 
+      // Check 1: Optional input node with no data → skip this node
+      const nodeData = node.data as Record<string, unknown>;
+      if (nodeData.isOptional) {
+        const isEmpty =
+          (node.type === "imageInput" && !nodeData.image) ||
+          (node.type === "audioInput" && !nodeData.audioFile) ||
+          (node.type === "prompt" && !(nodeData.prompt as string)?.trim());
+        if (isEmpty) {
+          set({ skippedNodeIds: new Set([...get().skippedNodeIds, node.id]) });
+          logger.info('node.execution', 'Node skipped (optional input empty)', {
+            nodeId: node.id,
+            nodeType: node.type,
+          });
+          return;
+        }
+      }
+
+      // Check 2: Any source node is skipped → propagate skip
+      const incomingEdgesForSkip = edges.filter((e) => e.target === node.id);
+      const hasSkippedSource = incomingEdgesForSkip.some((e) => get().skippedNodeIds.has(e.source));
+      if (hasSkippedSource) {
+        set({ skippedNodeIds: new Set([...get().skippedNodeIds, node.id]) });
+        if (nodeData.status !== undefined) {
+          get().updateNodeData(node.id, { status: "skipped" } as Partial<WorkflowNodeData>);
+        }
+        logger.info('node.execution', 'Node skipped (upstream source skipped)', {
+          nodeId: node.id,
+          nodeType: node.type,
+        });
+        return;
+      }
+
       logger.info('node.execution', `Executing ${node.type} node`, {
         nodeId: node.id,
         nodeType: node.type,
       });
 
       const executionCtx = get()._buildExecutionContext(node, signal);
+
+      // Batch mode: for generate-type nodes, detect textItems and loop through them
+      if (await runBatchIfApplicable(executionCtx)) {
+        return;
+      }
 
       switch (node.type) {
           case "imageInput":
@@ -1064,6 +1345,14 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
             const audioInputs = get().getConnectedInputs(node.id);
             if (audioInputs.audio.length > 0 && audioInputs.audio[0]) {
               get().updateNodeData(node.id, { audioFile: audioInputs.audio[0] });
+            }
+            break;
+          }
+          case "videoInput": {
+            // If video is connected from upstream, use it (connection wins over upload)
+            const videoInputs = get().getConnectedInputs(node.id);
+            if (videoInputs.videos.length > 0 && videoInputs.videos[0]) {
+              get().updateNodeData(node.id, { video: videoInputs.videos[0] });
             }
             break;
           }
@@ -1133,26 +1422,28 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
         }
     }; // End of executeSingleNode helper
 
-    try {
-      // Execute levels sequentially, but nodes within each level in parallel
+    // Helper to execute a set of levels sequentially, with parallel batches within each level
+    const executeLevels = async (
+      levels: ReturnType<typeof groupNodesByLevel>,
+      startLevel: number = 0
+    ): Promise<void> => {
       for (let levelIdx = startLevel; levelIdx < levels.length; levelIdx++) {
-        // Check if execution was stopped
         if (abortController.signal.aborted || !get().isRunning) break;
 
         const level = levels[levelIdx];
+        // Get fresh node references from the store for each level
+        const currentNodes = get().nodes;
         const levelNodes = level.nodeIds
-          .map((id) => nodes.find((n) => n.id === id))
+          .map((id) => currentNodes.find((n) => n.id === id))
           .filter((n): n is WorkflowNode => n !== undefined);
 
         if (levelNodes.length === 0) continue;
 
-        // Execute nodes in batches respecting concurrency limit
         const batches = chunk(levelNodes, maxConcurrentCalls);
 
         for (const batch of batches) {
           if (abortController.signal.aborted || !get().isRunning) break;
 
-          // Update currentNodeIds to show which nodes are executing
           const batchIds = batch.map((n) => n.id);
           set({ currentNodeIds: batchIds });
 
@@ -1162,12 +1453,10 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
             nodeIds: batchIds,
           });
 
-          // Execute batch in parallel
           const results = await Promise.allSettled(
             batch.map((node) => executeSingleNode(node, abortController.signal))
           );
 
-          // Check for failures with node context (fail-fast behavior)
           for (let i = 0; i < results.length; i++) {
             const r = results[i];
             if (r.status === 'rejected' &&
@@ -1185,13 +1474,129 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
           }
         }
       }
+    };
+
+    try {
+      // Partition edges into loop and forward edges
+      const loopEdges = edges.filter(e => e.data?.isLoop);
+      const forwardEdges = edges.filter(e => !e.data?.isLoop);
+
+      // Group nodes by level using ONLY forward edges (loop edges excluded from topological sort)
+      const levels = groupNodesByLevel(nodes, forwardEdges);
+
+      // Find starting level if startFromNodeId specified
+      let startLevel = 0;
+      if (startFromNodeId) {
+        const foundLevel = levels.findIndex((l) => l.nodeIds.includes(startFromNodeId));
+        if (foundLevel !== -1) startLevel = foundLevel;
+      }
+
+      if (loopEdges.length === 0) {
+        // No loops — existing execution path
+        await executeLevels(levels, startLevel);
+      } else {
+        // Warn if multiple loop edges (single loop supported in Phase 48)
+        if (loopEdges.length > 1) {
+          useToast.getState().show("Multiple loop edges detected — only the first loop will execute", "warning");
+        }
+
+        const loopEdge = loopEdges[0];
+        const loopBodyIds = new Set(findLoopSubgraph(loopEdge.source, loopEdge.target, forwardEdges));
+
+        // Expand loop body to include downstream nodes that depend on loop output.
+        // These nodes (e.g. outputGallery connected to a looped generateVideo) should
+        // execute each iteration so they can collect results from every pass.
+        const loopIterationIds = new Set(loopBodyIds);
+        let expanded = true;
+        while (expanded) {
+          expanded = false;
+          for (const edge of forwardEdges) {
+            if (loopIterationIds.has(edge.source) && !loopIterationIds.has(edge.target)) {
+              loopIterationIds.add(edge.target);
+              expanded = true;
+            }
+          }
+        }
+
+        // Partition levels: iterating nodes run each loop pass, non-iterating run once as prefix
+        const prefixLevels: typeof levels = [];
+        const loopLevels: typeof levels = [];
+
+        for (const level of levels) {
+          const iteratingIds = level.nodeIds.filter(id => loopIterationIds.has(id));
+          const nonIteratingIds = level.nodeIds.filter(id => !loopIterationIds.has(id));
+
+          if (iteratingIds.length > 0) {
+            loopLevels.push({ level: level.level, nodeIds: iteratingIds });
+          }
+          if (nonIteratingIds.length > 0) {
+            prefixLevels.push({ level: level.level, nodeIds: nonIteratingIds });
+          }
+        }
+
+        // Remap startLevel to prefixLevels and loopLevels indices
+        let prefixStartLevel = 0;
+        let loopStartLevel = -1;
+        if (startFromNodeId) {
+          const prefixIdx = prefixLevels.findIndex((l) => l.nodeIds.includes(startFromNodeId));
+          const loopIdx = loopLevels.findIndex((l) => l.nodeIds.includes(startFromNodeId));
+
+          if (prefixIdx !== -1) {
+            prefixStartLevel = prefixIdx;
+          } else if (loopIdx !== -1) {
+            // Resume target is inside loop - start from that level on first iteration
+            loopStartLevel = loopIdx;
+          }
+        }
+
+        // Execute prefix once
+        logger.info('node.execution', 'Executing prefix levels', { count: prefixLevels.length });
+        await executeLevels(prefixLevels, prefixStartLevel);
+
+        // Execute loop N times
+        // Normalize and clamp loopCount to handle malformed/imported values
+        const rawLoopCount = loopEdge.data?.loopCount ?? 3;
+        const parsed = Number(rawLoopCount);
+        const loopCount = Number.isFinite(parsed) && !isNaN(parsed)
+          ? Math.max(1, Math.min(100, parsed))
+          : 3;
+        for (let i = 0; i < loopCount; i++) {
+          if (abortController.signal.aborted || !get().isRunning) break;
+
+          // Copy output → input between iterations (skip first — uses original input)
+          if (i > 0) {
+            const freshNodes = get().nodes;
+            const sourceNode = freshNodes.find(n => n.id === loopEdge.source);
+            const targetNode = freshNodes.find(n => n.id === loopEdge.target);
+            if (sourceNode && targetNode) {
+              copyLoopOutput(
+                sourceNode,
+                loopEdge.sourceHandle ?? null,
+                targetNode,
+                loopEdge.targetHandle ?? null,
+                get().updateNodeData
+              );
+            }
+          }
+
+          logger.info('node.execution', `Loop iteration ${i + 1}/${loopCount}`);
+
+          // Execute loop body + downstream levels with fresh node state
+          // On first iteration, use loopStartLevel if resuming from a node inside the loop
+          const startLevel = i === 0 && loopStartLevel !== -1 ? loopStartLevel : 0;
+          await executeLevels(loopLevels, startLevel);
+        }
+      }
 
       // Check if we completed or were aborted
       if (!abortController.signal.aborted && get().isRunning) {
         logger.info('workflow.end', 'Workflow execution completed successfully');
       }
 
-      set({ isRunning: false, currentNodeIds: [], _abortController: null });
+      // Reset skipped nodes' status back to idle
+      resetSkippedNodes();
+
+      set({ isRunning: false, currentNodeIds: [], skippedNodeIds: new Set(), _abortController: null });
 
       saveLogSession();
       await logger.endSession();
@@ -1207,7 +1612,9 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
           "error"
         );
       }
-      set({ isRunning: false, currentNodeIds: [], _abortController: null });
+      // Reset skipped nodes' status back to idle
+      resetSkippedNodes();
+      set({ isRunning: false, currentNodeIds: [], skippedNodeIds: new Set(), _abortController: null });
 
       saveLogSession();
       await logger.endSession();
@@ -1220,7 +1627,90 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
     if (controller) {
       controller.abort("user-cancelled");
     }
-    set({ isRunning: false, currentNodeIds: [], _abortController: null });
+    set({ isRunning: false, currentNodeIds: [], skippedNodeIds: new Set(), _abortController: null });
+  },
+
+  mockTutorialExecution: async () => {
+    const { nodes, updateNodeData } = get();
+
+    // Find the Generate Image node
+    const nanoBananaNode = nodes.find((n) => n.type === "nanoBanana");
+    if (!nanoBananaNode) return;
+
+    const controller = new AbortController();
+    const { signal } = controller;
+
+    // Set execution state
+    set({
+      isRunning: true,
+      currentNodeIds: [nanoBananaNode.id],
+      _abortController: controller,
+    });
+
+    // Set loading state (triggers edge animations)
+    updateNodeData(nanoBananaNode.id, {
+      status: "loading",
+      error: null,
+    });
+
+    // Cancellable 5-second delay
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(resolve, 5000);
+        signal.addEventListener("abort", () => {
+          clearTimeout(timer);
+          reject(new DOMException("Aborted", "AbortError"));
+        }, { once: true });
+      });
+    } catch {
+      // Aborted during wait — clean up and exit
+      updateNodeData(nanoBananaNode.id, { status: "idle", error: null });
+      set({ isRunning: false, currentNodeIds: [], _abortController: null });
+      return;
+    }
+
+    // Load the mock output image
+    const mockImageUrl = "/tutorial/owl-aviator.png";
+    try {
+      const response = await fetch(mockImageUrl, { signal });
+      if (!response.ok) throw new Error(`Failed to fetch tutorial image: ${response.status}`);
+      const blob = await response.blob();
+      const reader = new FileReader();
+
+      const base64Image = await new Promise<string>((resolve, reject) => {
+        signal.addEventListener("abort", () => {
+          reader.abort();
+          reject(new DOMException("Aborted", "AbortError"));
+        }, { once: true });
+        reader.onloadend = () => resolve(reader.result as string);
+        reader.onerror = () => reject(reader.error);
+        reader.readAsDataURL(blob);
+      });
+
+      // Set output (completes the tutorial step)
+      updateNodeData(nanoBananaNode.id, {
+        status: "complete",
+        outputImage: base64Image,
+        imageHistory: [{ image: base64Image, timestamp: Date.now() }],
+        selectedHistoryIndex: 0,
+      });
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") {
+        updateNodeData(nanoBananaNode.id, { status: "idle", error: null });
+      } else {
+        updateNodeData(nanoBananaNode.id, {
+          status: "error",
+          error: "Failed to load tutorial image",
+        });
+      }
+    }
+
+    // Clear execution state
+    set({
+      isRunning: false,
+      currentNodeIds: [],
+      _abortController: null,
+    });
   },
 
   setMaxConcurrentCalls: (value: number) => {
@@ -1243,7 +1733,9 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
       return;
     }
 
-    set({ isRunning: true, currentNodeIds: [nodeId] });
+    // Create AbortController so stopWorkflow() can cancel regeneration
+    const abortController = new AbortController();
+    set({ isRunning: true, currentNodeIds: [nodeId], _abortController: abortController });
 
     await logger.startSession();
     logger.info('node.execution', 'Regenerating node', {
@@ -1252,11 +1744,16 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
     });
 
     try {
-      const executionCtx = get()._buildExecutionContext(node);
+      const executionCtx = get()._buildExecutionContext(node, abortController.signal);
 
       const regenOptions = { useStoredFallback: true };
 
-      if (node.type === "nanoBanana") {
+      // Try batch mode first (handles textItems from array nodes)
+      const wasBatch = await runBatchIfApplicable(executionCtx, regenOptions);
+
+      if (wasBatch) {
+        // Batch handled — skip to downstream execution
+      } else if (node.type === "nanoBanana") {
         await executeNanoBanana(executionCtx, regenOptions);
       } else if (node.type === "array") {
         await executeArray(executionCtx);
@@ -1272,27 +1769,27 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
         await executeSplitGrid(executionCtx);
       } else if (node.type === "videoStitch") {
         await executeVideoStitch(executionCtx);
-        set({ isRunning: false, currentNodeIds: [] });
+        set({ isRunning: false, currentNodeIds: [], _abortController: null });
         await logger.endSession();
         return;
       } else if (node.type === "easeCurve") {
         await executeEaseCurve(executionCtx);
-        set({ isRunning: false, currentNodeIds: [] });
+        set({ isRunning: false, currentNodeIds: [], _abortController: null });
         await logger.endSession();
         return;
       } else if (node.type === "videoTrim") {
         await executeVideoTrim(executionCtx);
-        set({ isRunning: false, currentNodeIds: [] });
+        set({ isRunning: false, currentNodeIds: [], _abortController: null });
         await logger.endSession();
         return;
       } else if (node.type === "videoFrameGrab") {
         await executeVideoFrameGrab(executionCtx);
-        set({ isRunning: false, currentNodeIds: [] });
+        set({ isRunning: false, currentNodeIds: [], _abortController: null });
         await logger.endSession();
         return;
       } else if (node.type === "output") {
         await executeOutput(executionCtx);
-        set({ isRunning: false, currentNodeIds: [] });
+        set({ isRunning: false, currentNodeIds: [], _abortController: null });
         await logger.endSession();
         return;
       }
@@ -1322,7 +1819,7 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
       }
 
       logger.info('node.execution', 'Node regeneration completed successfully', { nodeId });
-      set({ isRunning: false, currentNodeIds: [] });
+      set({ isRunning: false, currentNodeIds: [], _abortController: null });
 
       saveLogSession();
       await logger.endSession();
@@ -1334,7 +1831,7 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
         status: "error",
         error: error instanceof Error ? error.message : "Regeneration failed",
       });
-      set({ isRunning: false, currentNodeIds: [] });
+      set({ isRunning: false, currentNodeIds: [], _abortController: null });
 
       saveLogSession();
       await logger.endSession();
@@ -1389,11 +1886,31 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
       const executionCtx = get()._buildExecutionContext(node, signal);
       const regenOptions = { useStoredFallback: true };
 
+      // Try batch mode first (handles textItems from array nodes)
+      if (await runBatchIfApplicable(executionCtx, regenOptions)) {
+        return;
+      }
+
       switch (node.type) {
         case "imageInput":
-        case "audioInput":
-          // Data source nodes - no execution needed
+          // Data source node - no execution needed
           break;
+        case "audioInput": {
+          // If audio is connected from upstream, use it (connection wins over upload)
+          const audioInputs = get().getConnectedInputs(node.id);
+          if (audioInputs.audio.length > 0 && audioInputs.audio[0]) {
+            get().updateNodeData(node.id, { audioFile: audioInputs.audio[0] });
+          }
+          break;
+        }
+        case "videoInput": {
+          // If video is connected from upstream, use it (connection wins over upload)
+          const videoInputs = get().getConnectedInputs(node.id);
+          if (videoInputs.videos.length > 0 && videoInputs.videos[0]) {
+            get().updateNodeData(node.id, { video: videoInputs.videos[0] });
+          }
+          break;
+        }
         case "glbViewer":
           await executeGlbViewer(executionCtx);
           break;
@@ -1668,6 +2185,12 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
       workflow.edges = Array.from(edgeById.values());
     }
 
+    // Filter orphaned edges referencing non-existent nodes
+    const nodeIds = new Set(workflow.nodes.map((n) => n.id));
+    workflow.edges = workflow.edges.filter(
+      (edge) => nodeIds.has(edge.source) && nodeIds.has(edge.target)
+    );
+
     // Look up saved config from localStorage (only if workflow has an ID)
     const configs = loadSaveConfigs();
     const savedConfig = workflow.id ? configs[workflow.id] : null;
@@ -1675,13 +2198,13 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
     // Determine the workflow directory path (passed in, from saved config, or embedded in legacy workflow JSON)
     const directoryPath = workflowPath || savedConfig?.directoryPath || workflow.directoryPath || null;
 
-    // Hydrate images if we have a directory path and the workflow has image refs
+    // Hydrate media if we have a directory path and the workflow has media refs
     let hydratedWorkflow = workflow;
     if (directoryPath) {
       try {
-        hydratedWorkflow = await hydrateWorkflowImages(workflow, directoryPath);
+        hydratedWorkflow = await hydrateWorkflowMedia(workflow, directoryPath);
       } catch (error) {
-        console.error("Failed to hydrate workflow images:", error);
+        console.error("Failed to hydrate workflow media:", error);
         // Continue with original workflow if hydration fails
       }
     }
@@ -1720,12 +2243,24 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
       useExternalImageStorage: savedConfig?.useExternalImageStorage ?? true,
       // Reset viewed comments when loading new workflow
       viewedCommentNodeIds: new Set<string>(),
+      // Dismiss welcome modal after loading a workflow
+      showQuickstart: false,
     });
 
     // Clear snapshot unless explicitly preserving (e.g., AI workflow generation)
     if (!options?.preserveSnapshot) {
       get().clearSnapshot();
     }
+
+    // Clear undo history — loading a workflow is a fresh start
+    // Cancel any pending debounced snapshot so it doesn't fire into the new workflow
+    pendingDataSnapshot = null;
+    if (dataChangeTimer) {
+      clearTimeout(dataChangeTimer);
+      dataChangeTimer = null;
+    }
+    undoManager.clear();
+    syncUndoFlags(set);
 
     // Recompute dimming after loading workflow
     get().recomputeDimmedNodes();
@@ -1753,8 +2288,18 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
       viewedCommentNodeIds: new Set<string>(),
       // Reset dimmed nodes
       dimmedNodeIds: new Set<string>(),
+      // Reset skipped nodes
+      skippedNodeIds: new Set<string>(),
     });
     get().clearSnapshot();
+    // Clear undo history and cancel any pending debounced snapshot
+    pendingDataSnapshot = null;
+    if (dataChangeTimer) {
+      clearTimeout(dataChangeTimer);
+      dataChangeTimer = null;
+    }
+    undoManager.clear();
+    syncUndoFlags(set);
   },
 
   addToGlobalHistory: (item: Omit<ImageHistoryItem, "id">) => {
@@ -1873,15 +2418,16 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
         version: 1,
         id: workflowId,
         name: workflowName,
+        directoryPath: saveDirectoryPath,
         nodes: currentNodes,
         edges,
         edgeStyle,
         groups: groups && Object.keys(groups).length > 0 ? groups : undefined,
       };
 
-      // If external image storage is enabled, externalize images before saving
+      // If external media storage is enabled, externalize media before saving
       if (useExternalImageStorage) {
-        workflow = await externalizeWorkflowImages(workflow, saveDirectoryPath);
+        workflow = await externalizeWorkflowMedia(workflow, saveDirectoryPath);
       }
 
       const response = await fetch("/api/workflow", {
@@ -1899,22 +2445,23 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
       if (result.success) {
         const timestamp = Date.now();
 
-        // If we externalized images, update store nodes with the refs
-        // This prevents duplicate images on subsequent saves
+        // If we externalized media, update store nodes with the refs
+        // This prevents duplicate media on subsequent saves
         if (useExternalImageStorage && workflow.nodes !== currentNodes) {
-          // Merge refs from externalized nodes into current nodes (keeping image data)
+          // Merge refs from externalized nodes into current nodes (keeping media data)
           const nodesWithRefs = currentNodes.map((node, index) => {
             const externalizedNode = workflow.nodes[index];
             if (!externalizedNode || node.id !== externalizedNode.id) {
               return node; // Safety check - nodes should match
             }
 
-            // Copy refs from externalized node while keeping current image data
+            // Copy refs from externalized node while keeping current media data
             // Use type assertion to access ref fields that may exist on various node types
             const mergedData = { ...node.data } as Record<string, unknown>;
             const extData = externalizedNode.data as Record<string, unknown>;
 
             // Copy ref fields based on node type
+            // Image refs
             if (extData.imageRef && typeof extData.imageRef === 'string') {
               mergedData.imageRef = extData.imageRef;
             }
@@ -1926,6 +2473,29 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
             }
             if (extData.inputImageRefs && Array.isArray(extData.inputImageRefs)) {
               mergedData.inputImageRefs = extData.inputImageRefs;
+            }
+            if (extData.imageARef && typeof extData.imageARef === 'string') {
+              mergedData.imageARef = extData.imageARef;
+            }
+            if (extData.imageBRef && typeof extData.imageBRef === 'string') {
+              mergedData.imageBRef = extData.imageBRef;
+            }
+            if (extData.capturedImageRef && typeof extData.capturedImageRef === 'string') {
+              mergedData.capturedImageRef = extData.capturedImageRef;
+            }
+            // Video refs
+            if (extData.videoRef && typeof extData.videoRef === 'string') {
+              mergedData.videoRef = extData.videoRef;
+            }
+            if (extData.outputVideoRef && typeof extData.outputVideoRef === 'string') {
+              mergedData.outputVideoRef = extData.outputVideoRef;
+            }
+            // Audio refs
+            if (extData.audioFileRef && typeof extData.audioFileRef === 'string') {
+              mergedData.audioFileRef = extData.audioFileRef;
+            }
+            if (extData.outputAudioRef && typeof extData.outputAudioRef === 'string') {
+              mergedData.outputAudioRef = extData.outputAudioRef;
             }
 
             return { ...node, data: mergedData as WorkflowNodeData } as WorkflowNode;
@@ -2182,12 +2752,12 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
   captureSnapshot: () => {
     const state = get();
     // Deep copy the current workflow state to avoid reference sharing
-    const snapshot = {
-      nodes: JSON.parse(JSON.stringify(state.nodes)),
-      edges: JSON.parse(JSON.stringify(state.edges)),
-      groups: JSON.parse(JSON.stringify(state.groups)),
+    const snapshot = clonePreservingStrings({
+      nodes: state.nodes,
+      edges: state.edges,
+      groups: state.groups,
       edgeStyle: state.edgeStyle,
-    };
+    });
     set({
       previousWorkflowSnapshot: snapshot,
       manualChangeCount: 0,

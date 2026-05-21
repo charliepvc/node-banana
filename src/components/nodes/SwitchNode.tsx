@@ -9,7 +9,7 @@ import type { WorkflowNode, SwitchNodeData, HandleType } from "@/types";
 const HANDLE_COLORS: Record<HandleType, string> = {
   image: "#10b981",             // emerald — matches globals.css
   text: "#3b82f6",              // blue — matches globals.css
-  video: "#ffffff",             // white — default handle style
+  video: "#ec4899",             // pink — video handle style
   audio: "rgb(167, 139, 250)", // violet — matches GenerateAudioNode/OutputNode
   "3d": "#f97316",              // orange — matches globals.css
   easeCurve: "#ffffff",         // white — default handle style
@@ -115,11 +115,6 @@ export const SwitchNode = memo(({ id, data, selected }: NodeProps<WorkflowNode>)
   return (
     <BaseNode
       id={id}
-      title="Switch"
-      customTitle={nodeData.customTitle}
-      comment={nodeData.comment}
-      onCustomTitleChange={(customTitle) => updateNodeData(id, { customTitle })}
-      onCommentChange={(comment) => updateNodeData(id, { comment })}
       selected={selected}
       minWidth={220}
       minHeight={minHeight}

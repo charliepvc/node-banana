@@ -273,4 +273,40 @@ describe("executeGenerateVideo", () => {
     const videoHistory = (completeCall![1] as Record<string, unknown>).videoHistory as unknown[];
     expect(videoHistory.length).toBe(50); // capped at 50
   });
+
+  it("falls back on primary failure and stamps metadata", async () => {
+    const node = makeNode({
+      fallbackModel: {
+        provider: "replicate",
+        modelId: "video-fallback",
+        displayName: "Replicate Video Fallback",
+      },
+    });
+
+    mockFetch
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ success: false, error: "Primary video boom" }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ success: true, video: "data:video/mp4;base64,fallback" }),
+      });
+
+    const ctx = makeCtx(node);
+    await executeGenerateVideo(ctx);
+
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+
+    const secondBody = JSON.parse(mockFetch.mock.calls[1][1].body);
+    expect(secondBody.selectedModel.modelId).toBe("video-fallback");
+
+    const calls = (ctx.updateNodeData as ReturnType<typeof vi.fn>).mock.calls;
+    const stampCall = calls.find(
+      (c: unknown[]) => (c[1] as Record<string, unknown>).__usedFallback === true
+    );
+    expect(stampCall).toBeDefined();
+    expect((stampCall![1] as Record<string, unknown>).__fallbackModelUsed).toBe("Replicate Video Fallback");
+    expect((stampCall![1] as Record<string, unknown>).__primaryError).toBe("Primary video boom");
+  });
 });

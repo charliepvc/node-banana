@@ -10,6 +10,7 @@ import {
   WorkflowEdge,
   ImageInputNodeData,
   AudioInputNodeData,
+  VideoInputNodeData,
   AnnotationNodeData,
   NanoBananaNodeData,
   GenerateVideoNodeData,
@@ -38,8 +39,9 @@ export interface ConnectedInputs {
   audio: string[];
   model3d: string | null;
   text: string | null;
+  textItems: string[]; // All items from array batch mode (empty when not in batch)
   dynamicInputs: Record<string, string | string[]>;
-  easeCurve: { bezierHandles: [number, number, number, number]; easingPreset: string | null } | null;
+  easeCurve: { bezierHandles: [number, number, number, number]; easingPreset: string | null; outputDuration: number } | null;
 }
 
 /**
@@ -61,13 +63,15 @@ function isTextHandle(handleId: string | null | undefined): boolean {
 /**
  * Extract output data and type from a source node
  */
-function getSourceOutput(
+export function getSourceOutput(
   sourceNode: WorkflowNode,
   sourceHandle: string | null | undefined,
   edgeData?: Record<string, unknown>
 ): { type: "image" | "text" | "video" | "audio" | "3d"; value: string | null } {
   if (sourceNode.type === "imageInput") {
     return { type: "image", value: (sourceNode.data as ImageInputNodeData).image };
+  } else if (sourceNode.type === "videoInput") {
+    return { type: "video", value: (sourceNode.data as VideoInputNodeData).video };
   } else if (sourceNode.type === "audioInput") {
     return { type: "audio", value: (sourceNode.data as AudioInputNodeData).audioFile };
   } else if (sourceNode.type === "annotation") {
@@ -120,6 +124,41 @@ function getSourceOutput(
 }
 
 /**
+ * Resolves text source nodes through router (passthrough) nodes.
+ * Given a list of directly-connected source nodes, expands any router nodes
+ * by recursively following their upstream text connections to find the actual
+ * text-producing source nodes.
+ */
+export function resolveTextSourcesThroughRouters(
+  sourceNodes: WorkflowNode[],
+  allNodes: WorkflowNode[],
+  edges: { source: string; target: string; targetHandle?: string | null }[],
+  visited?: Set<string>
+): WorkflowNode[] {
+  const seen = visited ?? new Set<string>();
+  const resolved: WorkflowNode[] = [];
+
+  for (const node of sourceNodes) {
+    if (seen.has(node.id)) continue;
+    seen.add(node.id);
+
+    if (node.type === "router" || node.type === "switch") {
+      const upstreamNodes = edges
+        .filter((e) => e.target === node.id && e.targetHandle === "text")
+        .map((e) => allNodes.find((n) => n.id === e.source))
+        .filter((n): n is WorkflowNode => n !== undefined);
+      resolved.push(
+        ...resolveTextSourcesThroughRouters(upstreamNodes, allNodes, edges, seen)
+      );
+    } else {
+      resolved.push(node);
+    }
+  }
+
+  return resolved;
+}
+
+/**
  * Get all connected inputs for a node.
  * Pure function version of workflowStore.getConnectedInputs.
  */
@@ -131,13 +170,14 @@ export function getConnectedInputsPure(
   dimmedNodeIds?: Set<string>
 ): ConnectedInputs {
   const _visited = visited || new Set<string>();
-  if (_visited.has(nodeId)) return { images: [], videos: [], audio: [], model3d: null, text: null, dynamicInputs: {}, easeCurve: null };
+  if (_visited.has(nodeId)) return { images: [], videos: [], audio: [], model3d: null, text: null, textItems: [], dynamicInputs: {}, easeCurve: null };
   _visited.add(nodeId);
   const images: string[] = [];
   const videos: string[] = [];
   const audio: string[] = [];
   let model3d: string | null = null;
   let text: string | null = null;
+  const textItems: string[] = [];
   const dynamicInputs: Record<string, string | string[]> = {};
   let easeCurve: ConnectedInputs["easeCurve"] = null;
 
@@ -150,6 +190,7 @@ export function getConnectedInputsPure(
   if (inputSchema && inputSchema.length > 0) {
     const imageInputs = inputSchema.filter(i => i.type === "image");
     const textInputs = inputSchema.filter(i => i.type === "text");
+    const audioInputs = inputSchema.filter(i => i.type === "audio");
 
     imageInputs.forEach((input, index) => {
       handleToSchemaName[`image-${index}`] = input.name;
@@ -164,10 +205,22 @@ export function getConnectedInputsPure(
         handleToSchemaName["text"] = input.name;
       }
     });
+
+    audioInputs.forEach((input, index) => {
+      handleToSchemaName[`audio-${index}`] = input.name;
+      if (index === 0) {
+        handleToSchemaName["audio"] = input.name;
+      }
+    });
   }
 
+  // Cache passthrough node results so multiple edges from the same router/switch
+  // all receive correct data (the _visited set prevents re-traversal, so we cache
+  // the result from the first traversal and reuse it for subsequent edges).
+  const passthroughCache = new Map<string, ConnectedInputs>();
+
   edges
-    .filter((edge) => edge.target === nodeId)
+    .filter((edge) => edge.target === nodeId && !edge.data?.isLoop)
     .forEach((edge) => {
       const sourceNode = nodes.find((n) => n.id === edge.source);
       if (!sourceNode) return;
@@ -175,9 +228,24 @@ export function getConnectedInputsPure(
       // Skip dimmed source nodes — their data should not flow downstream
       if (dimmedNodeIds && dimmedNodeIds.has(sourceNode.id)) return;
 
+      // Array batch mode — send all items as textItems instead of a single item
+      // Derive from source node's current batchMode (not edge metadata which can go stale)
+      if (sourceNode.type === "array" && (sourceNode.data as ArrayNodeData).batchMode === true) {
+        const arrayData = sourceNode.data as ArrayNodeData;
+        const items = arrayData.outputItems;
+        if (items.length > 0) {
+          textItems.push(...items);
+          // Set text to first item for backward compatibility
+          if (text === null) text = items[0];
+        }
+        return; // Skip normal getSourceOutput processing
+      }
+
       // Router passthrough — traverse upstream to find actual data source
       if (sourceNode.type === "router") {
-        const routerInputs = getConnectedInputsPure(sourceNode.id, nodes, edges, _visited, dimmedNodeIds);
+        const routerInputs = passthroughCache.get(sourceNode.id)
+          ?? getConnectedInputsPure(sourceNode.id, nodes, edges, _visited, dimmedNodeIds);
+        passthroughCache.set(sourceNode.id, routerInputs);
         // Determine which type this edge carries based on the source handle
         const edgeType = edge.sourceHandle; // Will be "image", "text", "video", "audio", "3d", or "easeCurve"
 
@@ -210,7 +278,9 @@ export function getConnectedInputsPure(
         }
 
         // Enabled switch: recursively get upstream data (same pattern as router)
-        const switchInputs = getConnectedInputsPure(sourceNode.id, nodes, edges, _visited, dimmedNodeIds);
+        const switchInputs = passthroughCache.get(sourceNode.id)
+          ?? getConnectedInputsPure(sourceNode.id, nodes, edges, _visited, dimmedNodeIds);
+        passthroughCache.set(sourceNode.id, switchInputs);
         const edgeType = switchData.inputType;
 
         if (edgeType === "image") {
@@ -299,7 +369,7 @@ export function getConnectedInputsPure(
   // Extract easeCurve data from parent EaseCurve node (if not already set by router passthrough)
   if (!easeCurve) {
     const easeCurveEdge = edges.find(
-      (e) => e.target === nodeId && e.targetHandle === "easeCurve"
+      (e) => e.target === nodeId && e.targetHandle === "easeCurve" && !e.data?.isLoop
     );
     if (easeCurveEdge) {
       const sourceNode = nodes.find((n) => n.id === easeCurveEdge.source);
@@ -308,12 +378,13 @@ export function getConnectedInputsPure(
         easeCurve = {
           bezierHandles: sourceData.bezierHandles,
           easingPreset: sourceData.easingPreset,
+          outputDuration: sourceData.outputDuration,
         };
       }
     }
   }
 
-  return { images, videos, audio, model3d, text, dynamicInputs, easeCurve };
+  return { images, videos, audio, model3d, text, textItems, dynamicInputs, easeCurve };
 }
 
 /**
@@ -332,11 +403,13 @@ export function validateWorkflowPure(
   }
 
   // Check each Nano Banana node has required inputs (text required, image optional)
+  // Loop edges are excluded because they carry no data on the first iteration.
   nodes
     .filter((n) => n.type === "nanoBanana")
     .forEach((node) => {
       const textConnected = edges.some(
         (e) => e.target === node.id &&
+               !e.data?.isLoop &&
                (e.targetHandle === "text" || e.targetHandle?.startsWith("text-"))
       );
       if (!textConnected) {
@@ -350,6 +423,7 @@ export function validateWorkflowPure(
     .forEach((node) => {
       const textConnected = edges.some(
         (e) => e.target === node.id &&
+               !e.data?.isLoop &&
                (e.targetHandle === "text" || e.targetHandle?.startsWith("text-"))
       );
       if (!textConnected) {

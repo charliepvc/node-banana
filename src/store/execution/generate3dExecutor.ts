@@ -5,8 +5,10 @@
  * Extracted from nanoBananaExecutor's 3D handling code.
  */
 
-import type { Generate3DNodeData } from "@/types";
+import type { Generate3DNodeData, SelectedModel } from "@/types";
 import { buildGenerateHeaders } from "@/store/utils/buildApiHeaders";
+import { pollGenerateTask } from "./pollTaskCompletion";
+import { runWithFallback } from "./runWithFallback";
 import type { NodeExecutionContext } from "./types";
 
 export interface Generate3DOptions {
@@ -69,34 +71,126 @@ export async function executeGenerate3D(
     error: null,
   });
 
-  const provider = nodeData.selectedModel?.provider || "fal";
-  const headers = buildGenerateHeaders(provider, providerSettings);
+  const runOnce = async (modelToUse: SelectedModel, parametersOverride?: Record<string, unknown>): Promise<void> => {
+    const provider = modelToUse.provider;
+    const headers = buildGenerateHeaders(provider, providerSettings);
 
-  const requestPayload = {
-    images,
-    prompt: promptText || "",
-    selectedModel: nodeData.selectedModel,
-    parameters: nodeData.parameters,
-    dynamicInputs,
-    mediaType: "3d" as const,
-  };
+    const requestPayload = {
+      images,
+      prompt: promptText || "",
+      selectedModel: modelToUse,
+      parameters: parametersOverride ?? nodeData.parameters,
+      dynamicInputs,
+      mediaType: "3d" as const,
+    };
 
-  try {
-    const response = await fetch("/api/generate", {
-      method: "POST",
-      headers,
-      body: JSON.stringify(requestPayload),
-      ...(signal ? { signal } : {}),
-    });
+    try {
+      const response = await fetch("/api/generate", {
+        method: "POST",
+        headers,
+        body: JSON.stringify(requestPayload),
+        ...(signal ? { signal } : {}),
+      });
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      let errorMessage = `HTTP ${response.status}`;
-      try {
-        const errorJson = JSON.parse(errorText);
-        errorMessage = errorJson.error || errorMessage;
-      } catch {
-        if (errorText) errorMessage += ` - ${errorText.substring(0, 200)}`;
+      if (!response.ok) {
+        const errorText = await response.text();
+        let errorMessage = `HTTP ${response.status}`;
+        try {
+          const errorJson = JSON.parse(errorText);
+          errorMessage = errorJson.error || errorMessage;
+        } catch {
+          if (errorText) errorMessage += ` - ${errorText.substring(0, 200)}`;
+        }
+
+        updateNodeData(node.id, {
+          status: "error",
+          error: errorMessage,
+        });
+        throw new Error(errorMessage);
+      }
+
+      let result = await response.json();
+
+      // Handle polling response (long-running Kie tasks)
+      if (result.polling) {
+        result = await pollGenerateTask({
+          taskId: result.taskId,
+          provider: result.pollProvider,
+          modelId: result.pollModelId,
+          modelName: result.pollModelName,
+          mediaType: result.pollMediaType,
+          headers,
+          signal,
+        });
+
+        if (!result.success) {
+          updateNodeData(node.id, {
+            status: "error",
+            error: result.error || "3D generation failed",
+          });
+          throw new Error(result.error || "3D generation failed");
+        }
+      }
+
+      if (result.success && result.model3dUrl) {
+        updateNodeData(node.id, {
+          output3dUrl: result.model3dUrl,
+          status: "complete",
+          error: null,
+          savedFilename: null,
+          savedFilePath: null,
+        });
+
+        // Track cost if applicable
+        if (modelToUse.pricing) {
+          addIncurredCost(modelToUse.pricing.amount);
+        }
+
+        // Auto-save 3D model to generations folder if configured
+        if (generationsPath) {
+          const savePromise = fetch("/api/save-generation", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              directoryPath: generationsPath,
+              model3d: result.model3dUrl,
+              prompt: promptText,
+            }),
+          })
+            .then((res) => res.json())
+            .then((saveResult) => {
+              if (saveResult.success && saveResult.filename) {
+                updateNodeData(node.id, {
+                  savedFilename: saveResult.filename,
+                  savedFilePath: saveResult.filePath,
+                });
+              }
+            })
+            .catch((err) => {
+              console.error("Failed to save 3D model:", err);
+            });
+
+          trackSaveGeneration(`3d-${Date.now()}`, savePromise);
+        }
+      } else {
+        updateNodeData(node.id, {
+          status: "error",
+          error: result.error || "3D generation failed",
+        });
+        throw new Error(result.error || "3D generation failed");
+      }
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") {
+        throw error;
+      }
+
+      let errorMessage = "3D generation failed";
+      if (error instanceof TypeError && error.message.includes("NetworkError")) {
+        errorMessage = "Network error. Check your connection and try again.";
+      } else if (error instanceof TypeError) {
+        errorMessage = `Network error: ${error.message}`;
+      } else if (error instanceof Error) {
+        errorMessage = error.message;
       }
 
       updateNodeData(node.id, {
@@ -105,72 +199,27 @@ export async function executeGenerate3D(
       });
       throw new Error(errorMessage);
     }
+  };
 
-    const result = await response.json();
+  // Synthesize a SelectedModel for the primary if selectedModel is missing.
+  const primaryModel: SelectedModel = nodeData.selectedModel ?? {
+    provider: "fal",
+    modelId: "",
+    displayName: "",
+  };
 
-    if (result.success && result.model3dUrl) {
-      updateNodeData(node.id, {
-        output3dUrl: result.model3dUrl,
-        status: "complete",
-        error: null,
-      });
-
-      // Track cost if applicable
-      if (nodeData.selectedModel?.pricing) {
-        addIncurredCost(nodeData.selectedModel.pricing.amount);
-      }
-
-      // Auto-save 3D model to generations folder if configured
-      if (generationsPath) {
-        const savePromise = fetch("/api/save-generation", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            directoryPath: generationsPath,
-            model3d: result.model3dUrl,
-            prompt: promptText,
-          }),
-        })
-          .then((res) => res.json())
-          .then((saveResult) => {
-            if (saveResult.success && saveResult.filename) {
-              updateNodeData(node.id, {
-                savedFilename: saveResult.filename,
-                savedFilePath: saveResult.filePath,
-              });
-            }
-          })
-          .catch((err) => {
-            console.error("Failed to save 3D model:", err);
-          });
-
-        trackSaveGeneration(`3d-${Date.now()}`, savePromise);
-      }
-    } else {
-      updateNodeData(node.id, {
-        status: "error",
-        error: result.error || "3D generation failed",
-      });
-      throw new Error(result.error || "3D generation failed");
-    }
-  } catch (error) {
-    if (error instanceof DOMException && error.name === "AbortError") {
-      throw error;
-    }
-
-    let errorMessage = "3D generation failed";
-    if (error instanceof TypeError && error.message.includes("NetworkError")) {
-      errorMessage = "Network error. Check your connection and try again.";
-    } else if (error instanceof TypeError) {
-      errorMessage = `Network error: ${error.message}`;
-    } else if (error instanceof Error) {
-      errorMessage = error.message;
-    }
-
-    updateNodeData(node.id, {
-      status: "error",
-      error: errorMessage,
-    });
-    throw new Error(errorMessage);
+  if (!primaryModel.modelId) {
+    updateNodeData(node.id, { status: "error", error: "No model selected" });
+    throw new Error("No model selected");
   }
+
+  await runWithFallback({
+    nodeId: node.id,
+    primary: primaryModel,
+    fallback: nodeData.fallbackModel,
+    fallbackParameters: nodeData.fallbackParameters,
+    updateNodeData,
+    runOnce,
+    clearOutput: { output3dUrl: null, savedFilename: null, savedFilePath: null },
+  });
 }

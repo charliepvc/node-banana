@@ -11,6 +11,8 @@ import { Edge } from "@xyflow/react";
 export interface WorkflowEdgeData extends Record<string, unknown> {
   hasPause?: boolean;
   createdAt?: number;
+  isLoop?: boolean;
+  loopCount?: number;
 }
 
 // Workflow Edge
@@ -50,4 +52,5 @@ export interface NodeGroup {
   position: { x: number; y: number };
   size: { width: number; height: number };
   locked?: boolean;
+  isNbpInput?: boolean;
 }

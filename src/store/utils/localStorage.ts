@@ -19,6 +19,9 @@ export const PROVIDER_SETTINGS_KEY = "node-banana-provider-settings";
 export const RECENT_MODELS_KEY = "node-banana-recent-models";
 export const NODE_DEFAULTS_KEY = "node-banana-node-defaults";
 export const CANVAS_NAVIGATION_KEY = "node-banana-canvas-navigation";
+export const LAST_PROJECT_BASE_DIR_KEY = "node-banana-last-project-dir";
+export const WORKFLOWS_DIRECTORY_KEY = "node-banana-workflows-directory";
+export const FTUX_COMPLETED_KEY = "node-banana-ftux-completed";
 
 // Maximum recent models to store (show 4 in UI, keep 8 for persistence)
 export const MAX_RECENT_MODELS = 8;
@@ -217,9 +220,43 @@ export const saveCanvasNavigationSettings = (settings: CanvasNavigationSettings)
   localStorage.setItem(CANVAS_NAVIGATION_KEY, JSON.stringify(settings));
 };
 
+// Last project base directory helpers
+export const getLastProjectBaseDir = (): string | null => {
+  if (typeof window === "undefined") return null;
+  return localStorage.getItem(LAST_PROJECT_BASE_DIR_KEY);
+};
+
+export const setLastProjectBaseDir = (dir: string): void => {
+  if (typeof window === "undefined") return;
+  localStorage.setItem(LAST_PROJECT_BASE_DIR_KEY, dir);
+};
+
+// Workflows directory helpers
+export const getWorkflowsDirectory = (): string | null => {
+  if (typeof window === "undefined") return null;
+  return localStorage.getItem(WORKFLOWS_DIRECTORY_KEY);
+};
+
+export const setWorkflowsDirectory = (path: string): void => {
+  if (typeof window === "undefined") return;
+  localStorage.setItem(WORKFLOWS_DIRECTORY_KEY, path);
+};
+
 // Workflow ID generator
 export const generateWorkflowId = (): string =>
   `wf_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+// FTUX (First-Time User Experience) helpers
+export const getFTUXCompleted = (): boolean => {
+  if (typeof window === "undefined") return false;
+  const stored = localStorage.getItem(FTUX_COMPLETED_KEY);
+  return stored === "true";
+};
+
+export const setFTUXCompleted = (completed: boolean): void => {
+  if (typeof window === "undefined") return;
+  localStorage.setItem(FTUX_COMPLETED_KEY, completed ? "true" : "false");
+};
 
 /**
  * @deprecated Backward-compatible alias. Use `GenerateImageDefaults` instead.

@@ -25,6 +25,7 @@ import type { LLMProvider, LLMModelType, SelectedModel, ProviderType } from "./p
 export type NodeType =
   | "imageInput"
   | "audioInput"
+  | "videoInput"
   | "annotation"
   | "prompt"
   | "array"
@@ -50,7 +51,7 @@ export type NodeType =
 /**
  * Node execution status
  */
-export type NodeStatus = "idle" | "loading" | "complete" | "error";
+export type NodeStatus = "idle" | "loading" | "complete" | "error" | "skipped";
 
 /**
  * Image input node - loads/uploads images into the workflow
@@ -60,6 +61,7 @@ export interface ImageInputNodeData extends BaseNodeData {
   imageRef?: string; // External image reference for storage optimization
   filename: string | null;
   dimensions: { width: number; height: number } | null;
+  isOptional?: boolean;
 }
 
 /**
@@ -67,9 +69,24 @@ export interface ImageInputNodeData extends BaseNodeData {
  */
 export interface AudioInputNodeData extends BaseNodeData {
   audioFile: string | null;      // Base64 data URL of the audio file
+  audioFileRef?: string;         // External audio reference for storage optimization
   filename: string | null;       // Original filename for display
   duration: number | null;       // Duration in seconds
   format: string | null;         // MIME type (audio/mp3, audio/wav, etc.)
+  isOptional?: boolean;
+}
+
+/**
+ * Video input node - loads/uploads video files into the workflow
+ */
+export interface VideoInputNodeData extends BaseNodeData {
+  video: string | null;          // Base64 data URL or blob URL
+  videoRef?: string;             // External video reference for storage optimization
+  filename: string | null;
+  duration: number | null;       // Duration in seconds
+  dimensions: { width: number; height: number } | null;
+  format: string | null;         // MIME type (video/mp4, video/webm, etc.)
+  isOptional?: boolean;
 }
 
 /**
@@ -78,6 +95,7 @@ export interface AudioInputNodeData extends BaseNodeData {
 export interface PromptNodeData extends BaseNodeData {
   prompt: string;
   variableName?: string; // Optional variable name for use in PromptConstructor templates
+  isOptional?: boolean;
 }
 
 export type ArraySplitMode = "delimiter" | "newline" | "regex";
@@ -92,6 +110,7 @@ export interface ArrayNodeData extends BaseNodeData {
   regexPattern: string;
   trimItems: boolean;
   removeEmpty: boolean;
+  batchMode: boolean; // When true, all items are sent as a batch to downstream generate nodes
   selectedOutputIndex: number | null;
   outputItems: string[];
   outputText: string | null; // JSON array string for the primary text output
@@ -154,7 +173,7 @@ export interface CarouselVideoItem {
  */
 export interface ModelInputDef {
   name: string;
-  type: "image" | "text";
+  type: "image" | "text" | "audio";
   required: boolean;
   label: string;
   description?: string;
@@ -176,11 +195,18 @@ export interface NanoBananaNodeData extends BaseNodeData {
   useGoogleSearch: boolean; // Only available for Nano Banana Pro and Nano Banana 2
   useImageSearch: boolean; // Only available for Nano Banana 2
   parameters?: Record<string, unknown>; // Model-specific parameters for external providers
+  fallbackParameters?: Record<string, unknown>; // Parameters for fallback model
   inputSchema?: ModelInputDef[]; // Model's input schema for dynamic handles
+  parametersExpanded?: boolean; // Collapse state for inline parameter display
+  _settingsPanelHeight?: number; // Measured settings panel height for reload correction
   status: NodeStatus;
   error: string | null;
   imageHistory: CarouselImageItem[]; // Carousel history (IDs only)
   selectedHistoryIndex: number; // Currently selected image in carousel
+  fallbackModel?: SelectedModel; // JSON-compatible with Node Banana Pro
+  __usedFallback?: boolean; // Set by runWithFallback on successful fallback
+  __fallbackModelUsed?: string; // Display name of fallback model that succeeded
+  __primaryError?: string; // Error message from the primary attempt
 }
 
 /**
@@ -194,11 +220,18 @@ export interface GenerateVideoNodeData extends BaseNodeData {
   outputVideoRef?: string; // External video reference for storage optimization
   selectedModel?: SelectedModel; // Required for video generation (no legacy fallback)
   parameters?: Record<string, unknown>; // Model-specific parameters
+  fallbackParameters?: Record<string, unknown>; // Parameters for fallback model
   inputSchema?: ModelInputDef[]; // Model's input schema for dynamic handles
+  parametersExpanded?: boolean; // Collapse state for inline parameter display
+  _settingsPanelHeight?: number; // Measured settings panel height for reload correction
   status: NodeStatus;
   error: string | null;
   videoHistory: CarouselVideoItem[]; // Carousel history (IDs only)
   selectedVideoHistoryIndex: number; // Currently selected video in carousel
+  fallbackModel?: SelectedModel; // JSON-compatible with Node Banana Pro
+  __usedFallback?: boolean; // Set by runWithFallback on successful fallback
+  __fallbackModelUsed?: string; // Display name of fallback model that succeeded
+  __primaryError?: string; // Error message from the primary attempt
 }
 
 /**
@@ -213,9 +246,16 @@ export interface Generate3DNodeData extends BaseNodeData {
   savedFilePath: string | null;
   selectedModel?: SelectedModel;
   parameters?: Record<string, unknown>;
+  fallbackParameters?: Record<string, unknown>; // Parameters for fallback model
   inputSchema?: ModelInputDef[];
+  parametersExpanded?: boolean; // Collapse state for inline parameter display
+  _settingsPanelHeight?: number; // Measured settings panel height for reload correction
   status: NodeStatus;
   error: string | null;
+  fallbackModel?: SelectedModel; // JSON-compatible with Node Banana Pro
+  __usedFallback?: boolean; // Set by runWithFallback on successful fallback
+  __fallbackModelUsed?: string; // Display name of fallback model that succeeded
+  __primaryError?: string; // Error message from the primary attempt
 }
 
 /**
@@ -237,13 +277,20 @@ export interface GenerateAudioNodeData extends BaseNodeData {
   outputAudioRef?: string; // External audio reference for storage optimization
   selectedModel?: SelectedModel; // Required for audio generation
   parameters?: Record<string, unknown>; // Model-specific parameters (voice, speed, etc.)
+  fallbackParameters?: Record<string, unknown>; // Parameters for fallback model
   inputSchema?: ModelInputDef[]; // Model's input schema for dynamic handles
+  parametersExpanded?: boolean; // Collapse state for inline parameter display
+  _settingsPanelHeight?: number; // Measured settings panel height for reload correction
   status: NodeStatus;
   error: string | null;
   audioHistory: CarouselAudioItem[]; // Carousel history (IDs only)
   selectedAudioHistoryIndex: number; // Currently selected audio in carousel
   duration: number | null; // Duration in seconds
   format: string | null; // MIME type (audio/mp3, audio/wav, etc.)
+  fallbackModel?: SelectedModel; // JSON-compatible with Node Banana Pro
+  __usedFallback?: boolean; // Set by runWithFallback on successful fallback
+  __fallbackModelUsed?: string; // Display name of fallback model that succeeded
+  __primaryError?: string; // Error message from the primary attempt
 }
 
 /**
@@ -258,8 +305,15 @@ export interface LLMGenerateNodeData extends BaseNodeData {
   model: LLMModelType;
   temperature: number;
   maxTokens: number;
+  fallbackParameters?: Record<string, unknown>; // Parameters for fallback model (temperature, maxTokens)
+  parametersExpanded?: boolean; // Collapse state for inline parameter display
+  _settingsPanelHeight?: number; // Measured settings panel height for reload correction
   status: NodeStatus;
   error: string | null;
+  fallbackModel?: SelectedModel; // JSON-compatible with Node Banana Pro
+  __usedFallback?: boolean; // Set by runWithFallback on successful fallback
+  __fallbackModelUsed?: string; // Display name of fallback model that succeeded
+  __primaryError?: string; // Error message from the primary attempt
 }
 
 /**
@@ -279,6 +333,9 @@ export interface OutputNodeData extends BaseNodeData {
  */
 export interface OutputGalleryNodeData extends BaseNodeData {
   images: string[]; // Array of base64 data URLs from connected nodes
+  imageRefs?: string[]; // External storage refs for images
+  videos?: string[]; // Array of video URLs from connected nodes
+  videoRefs?: string[]; // External storage refs for videos
 }
 
 /**
@@ -286,7 +343,9 @@ export interface OutputGalleryNodeData extends BaseNodeData {
  */
 export interface ImageCompareNodeData extends BaseNodeData {
   imageA: string | null;
+  imageARef?: string;            // External image reference for storage optimization
   imageB: string | null;
+  imageBRef?: string;            // External image reference for storage optimization
 }
 
 /**
@@ -431,6 +490,7 @@ export interface GLBViewerNodeData extends BaseNodeData {
   glbUrl: string | null;       // Object URL for the loaded GLB file
   filename: string | null;     // Original filename for display
   capturedImage: string | null; // Base64 PNG snapshot of the 3D viewport
+  capturedImageRef?: string;    // External image reference for storage optimization
 }
 
 /**
@@ -439,6 +499,7 @@ export interface GLBViewerNodeData extends BaseNodeData {
 export type WorkflowNodeData =
   | ImageInputNodeData
   | AudioInputNodeData
+  | VideoInputNodeData
   | AnnotationNodeData
   | PromptNodeData
   | ArrayNodeData

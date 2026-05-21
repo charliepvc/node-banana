@@ -1,10 +1,12 @@
 "use client";
 
-import { useState, useRef, useMemo, useCallback } from "react";
-import { useWorkflowStore, WorkflowFile } from "@/store/workflowStore";
+import { useState, useMemo, useCallback } from "react";
+import { useWorkflowStore } from "@/store/workflowStore";
+import { useShallow } from "zustand/shallow";
 import { ProjectSetupModal } from "./ProjectSetupModal";
 import { CostIndicator } from "./CostIndicator";
 import { KeyboardShortcutsDialog } from "./KeyboardShortcutsDialog";
+import { WorkflowBrowserModal } from "./WorkflowBrowserModal";
 
 function CommentsNavigationIcon() {
   // Subscribe to nodes so we re-render when comments change
@@ -72,11 +74,27 @@ export function Header() {
     revertToSnapshot,
     shortcutsDialogOpen,
     setShortcutsDialogOpen,
-  } = useWorkflowStore();
+    setShowQuickstart,
+  } = useWorkflowStore(useShallow((state) => ({
+    workflowName: state.workflowName,
+    workflowId: state.workflowId,
+    saveDirectoryPath: state.saveDirectoryPath,
+    hasUnsavedChanges: state.hasUnsavedChanges,
+    lastSavedAt: state.lastSavedAt,
+    isSaving: state.isSaving,
+    setWorkflowMetadata: state.setWorkflowMetadata,
+    saveToFile: state.saveToFile,
+    loadWorkflow: state.loadWorkflow,
+    previousWorkflowSnapshot: state.previousWorkflowSnapshot,
+    revertToSnapshot: state.revertToSnapshot,
+    shortcutsDialogOpen: state.shortcutsDialogOpen,
+    setShortcutsDialogOpen: state.setShortcutsDialogOpen,
+    setShowQuickstart: state.setShowQuickstart,
+  })));
 
   const [showProjectModal, setShowProjectModal] = useState(false);
   const [projectModalMode, setProjectModalMode] = useState<"new" | "settings">("new");
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [showWorkflowBrowser, setShowWorkflowBrowser] = useState(false);
 
   const isProjectConfigured = !!workflowName;
   const canSave = !!(workflowId && workflowName && saveDirectoryPath);
@@ -99,30 +117,7 @@ export function Header() {
   };
 
   const handleOpenFile = () => {
-    fileInputRef.current?.click();
-  };
-
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = async (event) => {
-      try {
-        const workflow = JSON.parse(event.target?.result as string) as WorkflowFile;
-        if (workflow.version && workflow.nodes && workflow.edges) {
-          await loadWorkflow(workflow);
-        } else {
-          alert("Invalid workflow file format");
-        }
-      } catch {
-        alert("Failed to parse workflow file");
-      }
-    };
-    reader.readAsText(file);
-
-    // Reset input so same file can be loaded again
-    e.target.value = "";
+    setShowWorkflowBrowser(true);
   };
 
   const handleProjectSave = async (id: string, name: string, path: string) => {
@@ -209,19 +204,26 @@ export function Header() {
         onSave={handleProjectSave}
         mode={projectModalMode}
       />
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept=".json"
-        onChange={handleFileChange}
-        className="hidden"
+      <WorkflowBrowserModal
+        isOpen={showWorkflowBrowser}
+        onClose={() => setShowWorkflowBrowser(false)}
+        onWorkflowLoaded={async (workflow, dirPath) => {
+          setShowWorkflowBrowser(false);
+          await loadWorkflow(workflow, dirPath);
+        }}
       />
       <header className="h-11 bg-neutral-900 border-b border-neutral-800 flex items-center justify-between px-4 shrink-0">
         <div className="flex items-center gap-2">
-          <img src="/banana_icon.png" alt="Banana" className="w-6 h-6" />
-          <h1 className="text-2xl font-semibold text-neutral-100 tracking-tight">
-            Node Banana
-          </h1>
+          <button
+            onClick={() => setShowQuickstart(true)}
+            className="flex items-center gap-2 hover:opacity-80 transition-opacity"
+            title="Open welcome screen"
+          >
+            <img src="/banana_icon.png" alt="Banana" className="w-6 h-6" />
+            <h1 className="text-2xl font-semibold text-neutral-100 tracking-tight">
+              Node Banana
+            </h1>
+          </button>
 
           <div className="flex items-center gap-2 ml-4 pl-4 border-l border-neutral-700">
             {isProjectConfigured ? (
@@ -237,6 +239,7 @@ export function Header() {
                     disabled={isSaving}
                     className="relative p-1.5 text-neutral-400 hover:text-neutral-200 hover:bg-neutral-800 rounded transition-colors disabled:opacity-50"
                     title={isSaving ? "Saving..." : canSave ? "Save project" : "Configure save location"}
+                    data-tutorial="save-button"
                   >
                     <svg
                       className="w-4 h-4"
@@ -309,6 +312,7 @@ export function Header() {
                     onClick={handleNewProject}
                     className="relative p-1.5 text-neutral-400 hover:text-neutral-200 hover:bg-neutral-800 rounded transition-colors"
                     title="Save project"
+                    data-tutorial="save-button"
                   >
                     <svg
                       className="w-4 h-4"

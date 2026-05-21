@@ -54,6 +54,7 @@ const RELEVANT_CATEGORIES = [
   "text-to-speech",
   "text-to-music",
   "text-to-sound-effects",
+  "audio-to-video",
 ];
 
 // Kie.ai models (hardcoded - no discovery API available)
@@ -155,6 +156,69 @@ const KIE_MODELS: ProviderModel[] = [
     pageUrl: "https://docs.kie.ai/market/google/pro-image-to-image",
   },
   {
+    id: "nano-banana-2",
+    name: "Nano Banana 2 (Kie)",
+    description: "Google Gemini 3.1 Flash image generation via Kie.ai. Supports text-to-image and image-to-image with resolution control.",
+    provider: "kie",
+    capabilities: ["text-to-image", "image-to-image"],
+    coverImage: undefined,
+    pageUrl: "https://docs.kie.ai/market/google/nanobanana2",
+  },
+  {
+    id: "google/imagen4",
+    name: "Imagen 4",
+    description: "Google Imagen 4 high-quality text-to-image generation via Kie.ai.",
+    provider: "kie",
+    capabilities: ["text-to-image"],
+    coverImage: undefined,
+    pageUrl: "https://docs.kie.ai/market/google/imagen4",
+  },
+  {
+    id: "google/imagen4-fast",
+    name: "Imagen 4 Fast",
+    description: "Google Imagen 4 fast text-to-image generation via Kie.ai.",
+    provider: "kie",
+    capabilities: ["text-to-image"],
+    coverImage: undefined,
+    pageUrl: "https://docs.kie.ai/market/google/imagen4-fast",
+  },
+  {
+    id: "google/imagen4-ultra",
+    name: "Imagen 4 Ultra",
+    description: "Google Imagen 4 Ultra highest-quality text-to-image generation via Kie.ai.",
+    provider: "kie",
+    capabilities: ["text-to-image"],
+    coverImage: undefined,
+    pageUrl: "https://docs.kie.ai/market/google/imagen4-ultra",
+  },
+  {
+    id: "seedream/5-lite-text-to-image",
+    name: "Seedream 5.0 Lite",
+    description: "Seedream 5.0 Lite text-to-image generation via Kie.ai.",
+    provider: "kie",
+    capabilities: ["text-to-image"],
+    coverImage: undefined,
+    pageUrl: "https://docs.kie.ai/market/seedream/5-lite",
+  },
+  {
+    id: "seedream/5-lite-image-to-image",
+    name: "Seedream 5.0 Lite Edit",
+    description: "Seedream 5.0 Lite image editing via Kie.ai.",
+    provider: "kie",
+    capabilities: ["image-to-image"],
+    coverImage: undefined,
+    pageUrl: "https://docs.kie.ai/market/seedream/5-lite",
+  },
+  {
+    id: "wan/2-7-image",
+    name: "Wan 2.7 Image",
+    description: "Wan 2.7 image generation. Supports text-to-image and image-to-image via Kie.ai.",
+    provider: "kie",
+    capabilities: ["text-to-image", "image-to-image"],
+    coverImage: undefined,
+    pageUrl: "https://docs.kie.ai/market/wan/2-7-image",
+  },
+  {
     id: "grok-imagine/text-to-image",
     name: "Grok Imagine",
     description: "Grok Imagine text-to-image generation via Kie.ai.",
@@ -172,7 +236,43 @@ const KIE_MODELS: ProviderModel[] = [
     coverImage: undefined,
     pageUrl: "https://kie.ai/grok-imagine",
   },
-  // ============ Video Models (11) ============
+  // ============ Video Models ============
+  {
+    id: "bytedance/seedance-2/text-to-video",
+    name: "Seedance 2.0",
+    description: "ByteDance Seedance 2.0 text-to-video generation via Kie.ai. Supports audio generation and web search.",
+    provider: "kie",
+    capabilities: ["text-to-video"],
+    coverImage: undefined,
+    pageUrl: "https://docs.kie.ai/market/bytedance/seedance-2",
+  },
+  {
+    id: "bytedance/seedance-2/image-to-video",
+    name: "Seedance 2.0 I2V",
+    description: "ByteDance Seedance 2.0 image-to-video generation via Kie.ai. Supports audio generation and web search.",
+    provider: "kie",
+    capabilities: ["image-to-video"],
+    coverImage: undefined,
+    pageUrl: "https://docs.kie.ai/market/bytedance/seedance-2",
+  },
+  {
+    id: "bytedance/seedance-2-fast/text-to-video",
+    name: "Seedance 2.0 Fast",
+    description: "ByteDance Seedance 2.0 Fast text-to-video generation via Kie.ai. Supports audio generation and web search.",
+    provider: "kie",
+    capabilities: ["text-to-video"],
+    coverImage: undefined,
+    pageUrl: "https://docs.kie.ai/market/bytedance/seedance-2-fast",
+  },
+  {
+    id: "bytedance/seedance-2-fast/image-to-video",
+    name: "Seedance 2.0 Fast I2V",
+    description: "ByteDance Seedance 2.0 Fast image-to-video generation via Kie.ai. Supports audio generation and web search.",
+    provider: "kie",
+    capabilities: ["image-to-video"],
+    coverImage: undefined,
+    pageUrl: "https://docs.kie.ai/market/bytedance/seedance-2-fast",
+  },
   {
     id: "grok-imagine/text-to-video",
     name: "Grok Imagine Video",
@@ -221,6 +321,33 @@ const KIE_MODELS: ProviderModel[] = [
     pageUrl: "https://kie.ai/kling-2-6",
   },
   {
+    id: "kling-3.0/video/text-to-video",
+    name: "Kling 3.0",
+    description: "Kling 3.0 text-to-video generation via Kie.ai. Supports 3-15 second videos with sound.",
+    provider: "kie",
+    capabilities: ["text-to-video"],
+    coverImage: undefined,
+    pageUrl: "https://docs.kie.ai/market/kling/3-0",
+  },
+  {
+    id: "kling-3.0/video/image-to-video",
+    name: "Kling 3.0 I2V",
+    description: "Kling 3.0 image-to-video generation via Kie.ai. Supports up to 2 reference images.",
+    provider: "kie",
+    capabilities: ["image-to-video"],
+    coverImage: undefined,
+    pageUrl: "https://docs.kie.ai/market/kling/3-0",
+  },
+  {
+    id: "kling-3.0/motion-control",
+    name: "Kling 3.0 Motion Control",
+    description: "Kling 3.0 motion transfer from video to static image via Kie.ai.",
+    provider: "kie",
+    capabilities: ["image-to-video"],
+    coverImage: undefined,
+    pageUrl: "https://docs.kie.ai/market/kling/3-0-motion",
+  },
+  {
     id: "kling/v2-5-turbo-text-to-video-pro",
     name: "Kling 2.5 Turbo",
     description: "Kling 2.5 Turbo text-to-video generation via Kie.ai.",
@@ -266,6 +393,24 @@ const KIE_MODELS: ProviderModel[] = [
     capabilities: ["image-to-video"],
     coverImage: undefined,
     pageUrl: "https://kie.ai/wan-2-6",
+  },
+  {
+    id: "wan/2-7-text-to-video",
+    name: "Wan 2.7",
+    description: "Wan 2.7 text-to-video generation via Kie.ai. Supports prompt extension and watermark control.",
+    provider: "kie",
+    capabilities: ["text-to-video"],
+    coverImage: undefined,
+    pageUrl: "https://docs.kie.ai/market/wan/2-7-t2v",
+  },
+  {
+    id: "wan/2-7-image-to-video",
+    name: "Wan 2.7 I2V",
+    description: "Wan 2.7 image-to-video generation via Kie.ai. Supports first and last frame control.",
+    provider: "kie",
+    capabilities: ["image-to-video"],
+    coverImage: undefined,
+    pageUrl: "https://docs.kie.ai/market/wan/2-7-i2v",
   },
   {
     id: "topaz/video-upscale",
@@ -569,6 +714,8 @@ interface ModelsSuccessResponse {
   models: ProviderModel[];
   cached: boolean;
   providers: Record<string, ProviderResult>;
+  /** All providers that have API keys configured (env or client header) */
+  availableProviders: string[];
   errors?: string[];
 }
 
@@ -1022,6 +1169,13 @@ export async function GET(
   const kieKey = request.headers.get("X-Kie-Key") || process.env.KIE_API_KEY || null;
   const wavespeedKey = request.headers.get("X-WaveSpeed-Key") || process.env.WAVESPEED_API_KEY || null;
 
+  // Build list of all available providers (have keys from env or client headers)
+  const availableProviders: string[] = ["gemini"]; // Gemini always available
+  if (falKey) availableProviders.push("fal");
+  if (replicateKey) availableProviders.push("replicate");
+  if (kieKey) availableProviders.push("kie");
+  if (wavespeedKey) availableProviders.push("wavespeed");
+
   // Determine which providers to fetch from (excluding gemini/kie - handled separately as hardcoded)
   const providersToFetch: ProviderType[] = [];
   let includeGemini = false;
@@ -1034,7 +1188,17 @@ export async function GET(
       includeGemini = true;
     } else if (providerFilter === "kie") {
       // Only Kie requested - no external API calls needed (hardcoded models)
-      includeKie = true;
+      if (kieKey) {
+        includeKie = true;
+      } else {
+        return NextResponse.json<ModelsErrorResponse>(
+          {
+            success: false,
+            error: "Kie API key required. Add KIE_API_KEY to .env.local or configure in Settings.",
+          },
+          { status: 400 }
+        );
+      }
     } else if (providerFilter === "vertex") {
       includeVertex = true;
     } else if (providerFilter === "wavespeed") {
@@ -1249,6 +1413,7 @@ export async function GET(
     models: filteredModels,
     cached: anyFromCache && allFromCache,
     providers: providerResults,
+    availableProviders,
   };
 
   if (errors.length > 0) {

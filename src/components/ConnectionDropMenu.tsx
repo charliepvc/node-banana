@@ -346,8 +346,17 @@ const TEXT_SOURCE_OPTIONS: MenuOption[] = [
   },
 ];
 
-// Video can only connect to videoStitch, generateVideo (video-to-video), or output nodes
+// Video can connect to videoStitch, videoInput, generateVideo (video-to-video), or output nodes
 const VIDEO_TARGET_OPTIONS: MenuOption[] = [
+  {
+    type: "videoInput",
+    label: "Video Input",
+    icon: (
+      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="m15.75 10.5 4.72-4.72a.75.75 0 0 1 1.28.53v11.38a.75.75 0 0 1-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 0 0 2.25-2.25v-9a2.25 2.25 0 0 0-2.25-2.25h-9A2.25 2.25 0 0 0 2.25 7.5v9a2.25 2.25 0 0 0 2.25 2.25Z" />
+      </svg>
+    ),
+  },
   {
     type: "videoStitch",
     label: "Video Stitch",
@@ -403,6 +412,15 @@ const VIDEO_TARGET_OPTIONS: MenuOption[] = [
     ),
   },
   {
+    type: "outputGallery",
+    label: "Output Gallery",
+    icon: (
+      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z" />
+      </svg>
+    ),
+  },
+  {
     type: "router",
     label: "Router",
     icon: (
@@ -425,8 +443,17 @@ const VIDEO_TARGET_OPTIONS: MenuOption[] = [
   },
 ];
 
-// GenerateVideo and VideoStitch nodes produce video output
+// GenerateVideo, VideoStitch, and VideoInput nodes produce video output
 const VIDEO_SOURCE_OPTIONS: MenuOption[] = [
+  {
+    type: "videoInput",
+    label: "Video Input",
+    icon: (
+      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="m15.75 10.5 4.72-4.72a.75.75 0 0 1 1.28.53v11.38a.75.75 0 0 1-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 0 0 2.25-2.25v-9a2.25 2.25 0 0 0-2.25-2.25h-9A2.25 2.25 0 0 0 2.25 7.5v9a2.25 2.25 0 0 0 2.25 2.25Z" />
+      </svg>
+    ),
+  },
   {
     type: "generateVideo",
     label: "Generate Video",
@@ -494,6 +521,15 @@ const AUDIO_TARGET_OPTIONS: MenuOption[] = [
     icon: (
       <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
         <path strokeLinecap="round" strokeLinejoin="round" d="M9 9l10.5-3m0 6.553v3.75a2.25 2.25 0 01-1.632 2.163l-1.32.377a1.803 1.803 0 11-.99-3.467l2.31-.66a2.25 2.25 0 001.632-2.163zm0 0V2.25L9 5.25v10.303m0 0v3.75a2.25 2.25 0 01-1.632 2.163l-1.32.377a1.803 1.803 0 01-.99-3.467l2.31-.66A2.25 2.25 0 009 15.553z" />
+      </svg>
+    ),
+  },
+  {
+    type: "generateVideo",
+    label: "Generate Video",
+    icon: (
+      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="m15.75 10.5 4.72-4.72a.75.75 0 0 1 1.28.53v11.38a.75.75 0 0 1-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 0 0 2.25-2.25v-9a2.25 2.25 0 0 0-2.25-2.25h-9A2.25 2.25 0 0 0 2.25 7.5v9a2.25 2.25 0 0 0 2.25 2.25Z" />
       </svg>
     ),
   },
@@ -701,6 +737,7 @@ export function ConnectionDropMenu({
     <div
       ref={menuRef}
       tabIndex={-1}
+      data-tutorial="connection-drop-menu"
       className="fixed z-100 bg-neutral-800 border border-neutral-600 rounded-lg shadow-xl overflow-hidden min-w-[160px] outline-none"
       style={{
         left: position.x,
@@ -719,6 +756,7 @@ export function ConnectionDropMenu({
             key={option.type}
             onClick={() => onSelect({ type: option.type, isAction: option.isAction || false })}
             onMouseEnter={() => setSelectedIndex(index)}
+            data-tutorial={option.type === "nanoBanana" ? "generate-image-option" : undefined}
             className={`w-full px-3 py-2 text-left text-[11px] font-medium flex items-center gap-2 transition-colors ${
               index === selectedIndex
                 ? "bg-neutral-700 text-neutral-100"

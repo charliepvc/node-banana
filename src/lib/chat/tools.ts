@@ -166,84 +166,88 @@ Do NOT use "text", "content", or other guessed property names. Use ONLY the exac
  * @returns Tools object with answerQuestion, createWorkflow, and editWorkflow
  */
 export function createChatTools(nodeIds: string[]) {
+  const answerQuestionTool = tool<{ answer: string }, { answer: string }>({
+    description:
+      'Answer questions about how to use Node Banana. Use this for informational questions like "how do I change resolution?" or "what does the Split Grid node do?". Does NOT modify the workflow.',
+    inputSchema: z.object({
+      answer: z
+        .string()
+        .describe("The helpful answer to the user question"),
+    }),
+    execute: async ({ answer }) => ({ answer }),
+  });
+
+  const createWorkflowTool = tool<{ description: string }, { description: string }>({
+    description:
+      "Create a brand new workflow from scratch based on user description. Use when user wants to start fresh or build something new.",
+    inputSchema: z.object({
+      description: z
+        .string()
+        .describe("Description of what the workflow should do"),
+    }),
+    execute: async ({ description }) => ({ description }),
+  });
+
+  const editWorkflowTool = tool({
+    description:
+      "Make targeted edits to the current workflow. Use when user wants to add, remove, or modify nodes and connections. Reference nodes by their ID.",
+    inputSchema: z.object({
+      operations: z
+        .array(
+          z.object({
+            type: z.enum([
+              "addNode",
+              "removeNode",
+              "updateNode",
+              "addEdge",
+              "removeEdge",
+            ]),
+            nodeType: z
+              .string()
+              .optional()
+              .describe(
+                "Node type for addNode. Valid: imageInput, annotation, prompt, array, nanoBanana, generateVideo, generate3d, llmGenerate, splitGrid, output"
+              ),
+            nodeId: z
+              .string()
+              .optional()
+              .describe("Target node ID for removeNode/updateNode"),
+            data: z
+              .record(z.string(), z.unknown())
+              .optional()
+              .describe("Node data to set/merge for addNode/updateNode"),
+            source: z
+              .string()
+              .optional()
+              .describe("Source node ID for addEdge"),
+            target: z
+              .string()
+              .optional()
+              .describe("Target node ID for addEdge"),
+            sourceHandle: z
+              .string()
+              .optional()
+              .describe("Source handle type for addEdge (image or text)"),
+            targetHandle: z
+              .string()
+              .optional()
+              .describe("Target handle type for addEdge (image or text)"),
+            edgeId: z.string().optional().describe("Edge ID for removeEdge"),
+          })
+        )
+        .describe("List of edit operations to apply"),
+      explanation: z
+        .string()
+        .describe(
+          "Brief explanation of what changes are being made and why"
+        ),
+    }),
+    execute: async ({ operations, explanation }) => ({ operations, explanation }),
+  });
+
   return {
-    answerQuestion: tool({
-      description:
-        'Answer questions about how to use Node Banana. Use this for informational questions like "how do I change resolution?" or "what does the Split Grid node do?". Does NOT modify the workflow.',
-      inputSchema: z.object({
-        answer: z
-          .string()
-          .describe("The helpful answer to the user question"),
-      }),
-      execute: async ({ answer }) => ({ answer }),
-    }),
-
-    createWorkflow: tool({
-      description:
-        "Create a brand new workflow from scratch based on user description. Use when user wants to start fresh or build something new.",
-      inputSchema: z.object({
-        description: z
-          .string()
-          .describe("Description of what the workflow should do"),
-      }),
-      execute: async ({ description }) => ({ description }),
-    }),
-
-    editWorkflow: tool({
-      description:
-        "Make targeted edits to the current workflow. Use when user wants to add, remove, or modify nodes and connections. Reference nodes by their ID.",
-      inputSchema: z.object({
-        operations: z
-          .array(
-            z.object({
-              type: z.enum([
-                "addNode",
-                "removeNode",
-                "updateNode",
-                "addEdge",
-                "removeEdge",
-              ]),
-              nodeType: z
-                .string()
-                .optional()
-                .describe(
-                  "Node type for addNode. Valid: imageInput, annotation, prompt, array, nanoBanana, generateVideo, generate3d, llmGenerate, splitGrid, output"
-                ),
-              nodeId: z
-                .string()
-                .optional()
-                .describe("Target node ID for removeNode/updateNode"),
-              data: z
-                .record(z.string(), z.unknown())
-                .optional()
-                .describe("Node data to set/merge for addNode/updateNode"),
-              source: z
-                .string()
-                .optional()
-                .describe("Source node ID for addEdge"),
-              target: z
-                .string()
-                .optional()
-                .describe("Target node ID for addEdge"),
-              sourceHandle: z
-                .string()
-                .optional()
-                .describe("Source handle type for addEdge (image or text)"),
-              targetHandle: z
-                .string()
-                .optional()
-                .describe("Target handle type for addEdge (image or text)"),
-              edgeId: z.string().optional().describe("Edge ID for removeEdge"),
-            })
-          )
-          .describe("List of edit operations to apply"),
-        explanation: z
-          .string()
-          .describe(
-            "Brief explanation of what changes are being made and why"
-          ),
-      }),
-      execute: async ({ operations, explanation }) => ({ operations, explanation }),
-    }),
+    answerQuestion: answerQuestionTool,
+    createWorkflow: createWorkflowTool,
+    editWorkflow: editWorkflowTool,
   };
 }

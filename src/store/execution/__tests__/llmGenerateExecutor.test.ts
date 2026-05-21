@@ -239,4 +239,78 @@ describe("executeLlmGenerate", () => {
     expect(body.prompt).toBe("stored llm prompt");
     expect(body.images).toEqual(["stored.png"]);
   });
+
+  it("falls back on primary failure with provider mapping and stamps metadata", async () => {
+    // Primary is google/gemini-2.5-flash, fallback is stored as anthropic (no mapping needed)
+    const node = makeNode({
+      fallbackModel: {
+        provider: "anthropic",
+        modelId: "claude-sonnet-4.5",
+        displayName: "Claude Sonnet 4.5",
+      },
+    });
+
+    mockFetch
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ success: false, error: "Primary LLM boom" }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ success: true, text: "fallback output" }),
+      });
+
+    const ctx = makeCtx(node);
+    await executeLlmGenerate(ctx);
+
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+
+    // First call should use google/gemini-2.5-flash
+    const firstBody = JSON.parse(mockFetch.mock.calls[0][1].body);
+    expect(firstBody.provider).toBe("google");
+    expect(firstBody.model).toBe("gemini-2.5-flash");
+
+    // Second call (fallback) should use anthropic/claude-sonnet-4.5
+    const secondBody = JSON.parse(mockFetch.mock.calls[1][1].body);
+    expect(secondBody.provider).toBe("anthropic");
+    expect(secondBody.model).toBe("claude-sonnet-4.5");
+
+    const calls = (ctx.updateNodeData as ReturnType<typeof vi.fn>).mock.calls;
+    const stampCall = calls.find(
+      (c: unknown[]) => (c[1] as Record<string, unknown>).__usedFallback === true
+    );
+    expect(stampCall).toBeDefined();
+    expect((stampCall![1] as Record<string, unknown>).__fallbackModelUsed).toBe("Claude Sonnet 4.5");
+    expect((stampCall![1] as Record<string, unknown>).__primaryError).toBe("Primary LLM boom");
+  });
+
+  it("maps gemini->google when fallback is gemini", async () => {
+    const node = makeNode({
+      provider: "anthropic",
+      model: "claude-sonnet-4.5",
+      fallbackModel: {
+        provider: "gemini",
+        modelId: "gemini-2.5-flash",
+        displayName: "Gemini 2.5 Flash",
+      },
+    });
+
+    mockFetch
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ success: false, error: "Claude down" }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ success: true, text: "gemini result" }),
+      });
+
+    const ctx = makeCtx(node);
+    await executeLlmGenerate(ctx);
+
+    const secondBody = JSON.parse(mockFetch.mock.calls[1][1].body);
+    // Fallback provider "gemini" must be mapped to "google" for the /api/llm route
+    expect(secondBody.provider).toBe("google");
+    expect(secondBody.model).toBe("gemini-2.5-flash");
+  });
 });

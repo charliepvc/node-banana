@@ -42,6 +42,7 @@ vi.mock("@xyflow/react", () => {
       setNodes: () => {},
       screenToFlowPosition: (pos: unknown) => pos,
     }),
+    useConnection: (selector: (state: { inProgress: boolean }) => boolean) => selector({ inProgress: false }),
   };
 });
 

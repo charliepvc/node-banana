@@ -5,8 +5,10 @@
  * Used by both executeWorkflow and regenerateNode.
  */
 
-import type { GenerateAudioNodeData } from "@/types";
+import type { GenerateAudioNodeData, SelectedModel } from "@/types";
 import { buildGenerateHeaders } from "@/store/utils/buildApiHeaders";
+import { pollGenerateTask } from "./pollTaskCompletion";
+import { runWithFallback } from "./runWithFallback";
 import type { NodeExecutionContext } from "./types";
 
 export interface GenerateAudioOptions {
@@ -78,137 +80,171 @@ export async function executeGenerateAudio(
     error: null,
   });
 
-  const provider = nodeData.selectedModel.provider;
-  const headers = buildGenerateHeaders(provider, providerSettings);
+  const runOnce = async (modelToUse: SelectedModel, parametersOverride?: Record<string, unknown>): Promise<void> => {
+    const provider = modelToUse.provider;
+    const headers = buildGenerateHeaders(provider, providerSettings);
 
-  const requestPayload = {
-    images: [],
-    prompt: text,
-    selectedModel: nodeData.selectedModel,
-    parameters: nodeData.parameters,
-    dynamicInputs,
-    mediaType: "audio" as const,
-  };
+    const requestPayload = {
+      images: [],
+      prompt: text,
+      selectedModel: modelToUse,
+      parameters: parametersOverride ?? nodeData.parameters,
+      dynamicInputs,
+      mediaType: "audio" as const,
+    };
 
-  let errorHandled = false;
+    let errorHandled = false;
 
-  try {
-    const response = await fetch("/api/generate", {
-      method: "POST",
-      headers,
-      body: JSON.stringify(requestPayload),
-      ...(signal ? { signal } : {}),
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      let errorMessage = `HTTP ${response.status}`;
-      try {
-        const errorJson = JSON.parse(errorText);
-        errorMessage = errorJson.error || errorMessage;
-      } catch {
-        if (errorText) errorMessage += ` - ${errorText.substring(0, 200)}`;
-      }
-
-      updateNodeData(node.id, {
-        status: "error",
-        error: errorMessage,
-      });
-      errorHandled = true;
-      throw new Error(errorMessage);
-    }
-
-    const result = await response.json();
-
-    // Handle audio response (audio or audioUrl field)
-    const audioData = result.audio || result.audioUrl;
-    if (result.success && audioData) {
-      const timestamp = Date.now();
-      const audioId = `${timestamp}`;
-
-      // Add to node's audio history
-      const newHistoryItem = {
-        id: audioId,
-        timestamp,
-        prompt: text || "",
-        model: nodeData.selectedModel?.modelId || "",
-      };
-      const updatedHistory = [newHistoryItem, ...(nodeData.audioHistory || [])].slice(0, 50);
-
-      updateNodeData(node.id, {
-        outputAudio: audioData,
-        status: "complete",
-        error: null,
-        audioHistory: updatedHistory,
-        selectedAudioHistoryIndex: 0,
+    try {
+      const response = await fetch("/api/generate", {
+        method: "POST",
+        headers,
+        body: JSON.stringify(requestPayload),
+        ...(signal ? { signal } : {}),
       });
 
-      // Track cost
-      if (nodeData.selectedModel?.provider === "fal" && nodeData.selectedModel?.pricing) {
-        addIncurredCost(nodeData.selectedModel.pricing.amount);
+      if (!response.ok) {
+        const errorText = await response.text();
+        let errorMessage = `HTTP ${response.status}`;
+        try {
+          const errorJson = JSON.parse(errorText);
+          errorMessage = errorJson.error || errorMessage;
+        } catch {
+          if (errorText) errorMessage += ` - ${errorText.substring(0, 200)}`;
+        }
+
+        updateNodeData(node.id, {
+          status: "error",
+          error: errorMessage,
+        });
+        errorHandled = true;
+        throw new Error(errorMessage);
       }
 
-      // Auto-save to generations folder if configured
-      if (generationsPath) {
-        const savePromise = fetch("/api/save-generation", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            directoryPath: generationsPath,
-            audio: audioData,
-            prompt: text,
-            imageId: audioId,
-          }),
-        })
-          .then((res) => res.json())
-          .then((saveResult) => {
-            if (saveResult.success && saveResult.imageId && saveResult.imageId !== audioId) {
-              const currentNode = getNodes().find((n) => n.id === node.id);
-              if (currentNode) {
-                const currentData = currentNode.data as GenerateAudioNodeData;
-                const histCopy = [...(currentData.audioHistory || [])];
-                const entryIndex = histCopy.findIndex((h) => h.id === audioId);
-                if (entryIndex !== -1) {
-                  histCopy[entryIndex] = { ...histCopy[entryIndex], id: saveResult.imageId };
-                  updateNodeData(node.id, { audioHistory: histCopy });
+      let result = await response.json();
+
+      // Handle polling response (long-running Kie tasks)
+      if (result.polling) {
+        result = await pollGenerateTask({
+          taskId: result.taskId,
+          provider: result.pollProvider,
+          modelId: result.pollModelId,
+          modelName: result.pollModelName,
+          mediaType: result.pollMediaType,
+          headers,
+          signal,
+        });
+
+        if (!result.success) {
+          updateNodeData(node.id, {
+            status: "error",
+            error: result.error || "Audio generation failed",
+          });
+          errorHandled = true;
+          throw new Error(result.error || "Audio generation failed");
+        }
+      }
+
+      // Handle audio response (audio or audioUrl field)
+      const audioData = result.audio || result.audioUrl;
+      if (result.success && audioData) {
+        const timestamp = Date.now();
+        const audioId = `${timestamp}`;
+
+        // Add to node's audio history
+        const newHistoryItem = {
+          id: audioId,
+          timestamp,
+          prompt: text || "",
+          model: modelToUse.modelId || "",
+        };
+        const updatedHistory = [newHistoryItem, ...(nodeData.audioHistory || [])].slice(0, 50);
+
+        updateNodeData(node.id, {
+          outputAudio: audioData,
+          status: "complete",
+          error: null,
+          audioHistory: updatedHistory,
+          selectedAudioHistoryIndex: 0,
+        });
+
+        // Track cost
+        if (modelToUse.provider === "fal" && modelToUse.pricing) {
+          addIncurredCost(modelToUse.pricing.amount);
+        }
+
+        // Auto-save to generations folder if configured
+        if (generationsPath) {
+          const savePromise = fetch("/api/save-generation", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              directoryPath: generationsPath,
+              audio: audioData,
+              prompt: text,
+              imageId: audioId,
+            }),
+          })
+            .then((res) => res.json())
+            .then((saveResult) => {
+              if (saveResult.success && saveResult.imageId && saveResult.imageId !== audioId) {
+                const currentNode = getNodes().find((n) => n.id === node.id);
+                if (currentNode) {
+                  const currentData = currentNode.data as GenerateAudioNodeData;
+                  const histCopy = [...(currentData.audioHistory || [])];
+                  const entryIndex = histCopy.findIndex((h) => h.id === audioId);
+                  if (entryIndex !== -1) {
+                    histCopy[entryIndex] = { ...histCopy[entryIndex], id: saveResult.imageId };
+                    updateNodeData(node.id, { audioHistory: histCopy });
+                  }
                 }
               }
-            }
-          })
-          .catch((err) => {
-            console.error("Failed to save audio generation:", err);
-          });
+            })
+            .catch((err) => {
+              console.error("Failed to save audio generation:", err);
+            });
 
-        trackSaveGeneration(audioId, savePromise);
+          trackSaveGeneration(audioId, savePromise);
+        }
+      } else {
+        updateNodeData(node.id, {
+          status: "error",
+          error: result.error || "Audio generation failed",
+        });
+        errorHandled = true;
+        throw new Error(result.error || "Audio generation failed");
       }
-    } else {
-      updateNodeData(node.id, {
-        status: "error",
-        error: result.error || "Audio generation failed",
-      });
-      errorHandled = true;
-      throw new Error(result.error || "Audio generation failed");
-    }
-  } catch (error) {
-    if (error instanceof DOMException && error.name === "AbortError") {
-      throw error;
-    }
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") {
+        throw error;
+      }
 
-    let errorMessage = "Audio generation failed";
-    if (error instanceof TypeError && error.message.includes("NetworkError")) {
-      errorMessage = "Network error. Check your connection and try again.";
-    } else if (error instanceof TypeError) {
-      errorMessage = `Network error: ${error.message}`;
-    } else if (error instanceof Error) {
-      errorMessage = error.message;
-    }
+      let errorMessage = "Audio generation failed";
+      if (error instanceof TypeError && error.message.includes("NetworkError")) {
+        errorMessage = "Network error. Check your connection and try again.";
+      } else if (error instanceof TypeError) {
+        errorMessage = `Network error: ${error.message}`;
+      } else if (error instanceof Error) {
+        errorMessage = error.message;
+      }
 
-    if (!errorHandled) {
-      updateNodeData(node.id, {
-        status: "error",
-        error: errorMessage,
-      });
+      if (!errorHandled) {
+        updateNodeData(node.id, {
+          status: "error",
+          error: errorMessage,
+        });
+      }
+      throw new Error(errorMessage);
     }
-    throw new Error(errorMessage);
-  }
+  };
+
+  await runWithFallback({
+    nodeId: node.id,
+    primary: nodeData.selectedModel,
+    fallback: nodeData.fallbackModel,
+    fallbackParameters: nodeData.fallbackParameters,
+    updateNodeData,
+    runOnce,
+    clearOutput: { outputAudio: null },
+  });
 }

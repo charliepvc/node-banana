@@ -5,7 +5,7 @@ import { WorkflowEdgeData } from "@/types";
 import { useMemo, useEffect, useState, useRef } from "react";
 
 export function EdgeToolbar() {
-  const { edges, toggleEdgePause, removeEdge } = useWorkflowStore();
+  const { edges, toggleEdgePause, removeEdge, setLoopCount } = useWorkflowStore();
   const [clickPosition, setClickPosition] = useState<{ x: number; y: number } | null>(null);
   const previousSelectedEdgeId = useRef<string | null>(null);
 
@@ -79,6 +79,12 @@ export function EdgeToolbar() {
     }
   };
 
+  const handleLoopCountChange = (delta: number) => {
+    if (selectedEdge) {
+      setLoopCount(selectedEdge.id, loopCount + delta);
+    }
+  };
+
   const handleDelete = () => {
     if (selectedEdge) {
       removeEdge(selectedEdge.id);
@@ -88,6 +94,8 @@ export function EdgeToolbar() {
   if (!toolbarPosition || !selectedEdge) return null;
 
   const hasPause = selectedEdge.data?.hasPause;
+  const isLoop = selectedEdge.data?.isLoop;
+  const loopCount = selectedEdge.data?.loopCount ?? 3;
 
   return (
     <div
@@ -103,8 +111,36 @@ export function EdgeToolbar() {
           Image {sequenceNumber}
         </span>
       )}
-      <button
-        onClick={handleTogglePause}
+      {isLoop && (
+        <>
+          <span className="text-[10px] font-medium text-fuchsia-300 px-1.5">Loop</span>
+          <button
+            onClick={() => handleLoopCountChange(-1)}
+            disabled={loopCount <= 1}
+            className="p-1 rounded hover:bg-neutral-700 text-fuchsia-300 hover:text-fuchsia-100 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+            title="Decrease loop count"
+          >
+            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" d="M5 12h14" />
+            </svg>
+          </button>
+          <span className="text-[11px] font-mono text-fuchsia-100 min-w-[20px] text-center">{loopCount}</span>
+          <button
+            onClick={() => handleLoopCountChange(1)}
+            disabled={loopCount >= 100}
+            className="p-1 rounded hover:bg-neutral-700 text-fuchsia-300 hover:text-fuchsia-100 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+            title="Increase loop count"
+          >
+            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" d="M12 5v14M5 12h14" />
+            </svg>
+          </button>
+          <div className="w-px h-4 bg-neutral-600" />
+        </>
+      )}
+      {!isLoop && (
+        <button
+          onClick={handleTogglePause}
         className={`p-1.5 rounded hover:bg-neutral-700 transition-colors ${
           hasPause
             ? "text-amber-400 hover:text-amber-300"
@@ -124,6 +160,7 @@ export function EdgeToolbar() {
           </svg>
         )}
       </button>
+      )}
       <button
         onClick={handleDelete}
         className="p-1.5 rounded hover:bg-neutral-700 text-neutral-400 hover:text-red-400 transition-colors"

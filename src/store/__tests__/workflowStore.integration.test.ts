@@ -2474,7 +2474,7 @@ describe("workflowStore integration tests", () => {
 
   describe("Group operations with non-standard node types", () => {
     describe("createGroup bounding box calculation", () => {
-      it("should correctly calculate bounding box for easeCurve nodes (340x480)", () => {
+      it("should correctly calculate bounding box for easeCurve nodes (340x280)", () => {
         useWorkflowStore.setState({
           nodes: [
             createTestNode("ease-1", "easeCurve", {
@@ -2509,10 +2509,10 @@ describe("workflowStore integration tests", () => {
 
         expect(groupId).toBeTruthy();
         const group = useWorkflowStore.getState().groups[groupId];
-        // easeCurve is 340x480, so maxX = 500 + 340 = 840, maxY = 100 + 480 = 580
+        // easeCurve is 340x280, so maxX = 500 + 340 = 840, maxY = 100 + 280 = 380
         // With padding=20 and headerHeight=32: position.x = 100-20=80, width = 840-100+40=780
         expect(group.size.width).toBeGreaterThanOrEqual(740); // Must account for 340px wide nodes
-        expect(group.size.height).toBeGreaterThanOrEqual(480); // Must account for 480px tall nodes
+        expect(group.size.height).toBeGreaterThanOrEqual(280); // Must account for 280px tall nodes
       });
 
       it("should correctly calculate bounding box for videoStitch nodes (400x280)", () => {

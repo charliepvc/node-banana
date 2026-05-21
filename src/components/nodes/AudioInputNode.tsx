@@ -3,19 +3,21 @@
 import { useCallback, useRef, useState, useEffect } from "react";
 import { Handle, Position, NodeProps, Node } from "@xyflow/react";
 import { BaseNode } from "./BaseNode";
-import { useCommentNavigation } from "@/hooks/useCommentNavigation";
 import { useWorkflowStore } from "@/store/workflowStore";
 import { AudioInputNodeData } from "@/types";
 import { useAudioVisualization } from "@/hooks/useAudioVisualization";
 import { useAudioPlayback } from "@/hooks/useAudioPlayback";
+import { downloadMedia } from "@/utils/downloadMedia";
+import { useShowHandleLabels } from "@/hooks/useShowHandleLabels";
+import { HandleLabel } from "./HandleLabel";
 
 type AudioInputNodeType = Node<AudioInputNodeData, "audioInput">;
 
 export function AudioInputNode({ id, data, selected }: NodeProps<AudioInputNodeType>) {
   const nodeData = data;
-  const commentNavigation = useCommentNavigation(id);
   const updateNodeData = useWorkflowStore((state) => state.updateNodeData);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const showLabels = useShowHandleLabels(selected);
 
   const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
 
@@ -131,13 +133,7 @@ export function AudioInputNode({ id, data, selected }: NodeProps<AudioInputNodeT
   return (
     <BaseNode
       id={id}
-      title="Audio"
-      customTitle={nodeData.customTitle}
-      comment={nodeData.comment}
-      onCustomTitleChange={(title) => updateNodeData(id, { customTitle: title || undefined })}
-      onCommentChange={(comment) => updateNodeData(id, { comment: comment || undefined })}
       selected={selected}
-      commentNavigation={commentNavigation ?? undefined}
       minWidth={250}
       minHeight={150}
     >
@@ -151,6 +147,11 @@ export function AudioInputNode({ id, data, selected }: NodeProps<AudioInputNodeT
 
       {nodeData.audioFile ? (
         <div className="relative group flex-1 flex flex-col min-h-0 gap-2">
+          {nodeData.isOptional && (
+            <span className="absolute top-1 left-1 z-10 text-[9px] font-medium text-neutral-300 bg-black/50 px-1.5 py-0.5 rounded">
+              Optional
+            </span>
+          )}
           {/* Filename and duration */}
           <div className="flex items-center justify-between shrink-0">
             <span className="text-[10px] text-neutral-400 truncate max-w-[150px]" title={nodeData.filename || ""}>
@@ -216,6 +217,17 @@ export function AudioInputNode({ id, data, selected }: NodeProps<AudioInputNodeT
             </span>
           </div>
 
+          {/* Download button */}
+          <button
+            onClick={() => downloadMedia(nodeData.audioFile!, "audio")}
+            aria-label="Download audio"
+            className="absolute top-1 right-7 w-5 h-5 bg-black/60 hover:bg-black/80 text-white rounded text-xs opacity-0 group-hover:opacity-100 focus-visible:opacity-100 focus-visible:ring-1 focus-visible:ring-white transition-opacity flex items-center justify-center"
+            title="Download audio"
+          >
+            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+            </svg>
+          </button>
           {/* Remove button */}
           <button
             onClick={handleRemove}
@@ -228,16 +240,20 @@ export function AudioInputNode({ id, data, selected }: NodeProps<AudioInputNodeT
         </div>
       ) : (
         <div
+          role="button"
+          tabIndex={0}
+          aria-label="Upload audio file"
           onClick={() => fileInputRef.current?.click()}
+          onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); fileInputRef.current?.click(); } }}
           onDrop={handleDrop}
           onDragOver={handleDragOver}
-          className="w-full flex-1 min-h-[112px] border border-dashed border-neutral-600 rounded flex flex-col items-center justify-center cursor-pointer hover:border-neutral-500 hover:bg-neutral-700/50 transition-colors"
+          className={`w-full h-full bg-neutral-900/40 flex flex-col items-center justify-center cursor-pointer hover:bg-neutral-800/60 transition-colors ${nodeData.isOptional ? "border-2 border-dashed border-neutral-600" : ""}`}
         >
-          <svg className="w-6 h-6 text-neutral-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+          <svg className="w-8 h-8 text-neutral-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M9 9l10.5-3m0 6.553v3.75a2.25 2.25 0 01-1.632 2.163l-1.32.377a1.803 1.803 0 11-.99-3.467l2.31-.66a2.25 2.25 0 001.632-2.163zm0 0V2.25L9 5.25v10.303m0 0v3.75a2.25 2.25 0 01-1.632 2.163l-1.32.377a1.803 1.803 0 01-.99-3.467l2.31-.66A2.25 2.25 0 009 15.553z" />
           </svg>
-          <span className="text-[10px] text-neutral-400 mt-1">
-            Drop audio or click
+          <span className="text-xs text-neutral-500 mt-2">
+            {nodeData.isOptional ? "Optional" : "Drop audio or click"}
           </span>
         </div>
       )}
@@ -249,6 +265,7 @@ export function AudioInputNode({ id, data, selected }: NodeProps<AudioInputNodeT
         data-handletype="audio"
         style={{ background: "rgb(167, 139, 250)" }}
       />
+      <HandleLabel label="Audio" side="target" color="var(--handle-color-audio)" visible={showLabels} />
       <Handle
         type="source"
         position={Position.Right}
@@ -256,6 +273,7 @@ export function AudioInputNode({ id, data, selected }: NodeProps<AudioInputNodeT
         data-handletype="audio"
         style={{ background: "rgb(167, 139, 250)" }}
       />
+      <HandleLabel label="Audio" side="source" color="var(--handle-color-audio)" visible={showLabels} />
     </BaseNode>
   );
 }

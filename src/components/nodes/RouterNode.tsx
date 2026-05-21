@@ -11,7 +11,7 @@ const ALL_HANDLE_TYPES = ["image", "text", "video", "audio", "3d", "easeCurve"] 
 const HANDLE_COLORS: Record<(typeof ALL_HANDLE_TYPES)[number], string> = {
   image: "#10b981",             // emerald — matches globals.css
   text: "#3b82f6",              // blue — matches globals.css
-  video: "#ffffff",             // white — default handle style
+  video: "#ec4899",             // pink — video handle style
   audio: "rgb(167, 139, 250)", // violet — matches GenerateAudioNode/OutputNode
   "3d": "#f97316",              // orange — matches globals.css
   easeCurve: "#ffffff",         // white — default handle style
@@ -71,11 +71,6 @@ export const RouterNode = memo(({ id, data, selected }: NodeProps<WorkflowNode>)
   return (
     <BaseNode
       id={id}
-      title="Router"
-      customTitle={nodeData.customTitle}
-      comment={nodeData.comment}
-      onCustomTitleChange={(customTitle) => updateNodeData(id, { customTitle })}
-      onCommentChange={(comment) => updateNodeData(id, { comment })}
       selected={selected}
       minWidth={200}
       minHeight={minHeight}

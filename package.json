@@ -1,6 +1,6 @@
 {
   "name": "node-banana",
-  "version": "1.0.0",
+  "version": "1.6.0",
   "private": true,
   "scripts": {
     "dev": "node server.js",
@@ -33,6 +33,7 @@
     "react-markdown": "^10.1.0",
     "tailwindcss": "^4.1.17",
     "three": "^0.182.0",
+    "zod": "^4.4.3",
     "zustand": "^5.0.9"
   },
   "devDependencies": {
@@ -46,7 +47,7 @@
     "@vitejs/plugin-react": "^4.7.0",
     "@vitest/coverage-v8": "^4.0.16",
     "jsdom": "^27.4.0",
-    "typescript": "^5.9.3",
+    "typescript": "5.9.3",
     "vite-tsconfig-paths": "^6.0.4",
     "vitest": "^4.0.16"
   }
