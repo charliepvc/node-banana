@@ -381,14 +381,34 @@ export async function generateWithVertexVideo(
     return { success: false, error: "No video generated. The content may have been filtered by safety policies." };
   }
 
-  const videoUri = generatedVideos[0]?.video?.uri;
-  if (!videoUri) {
-    console.error(`[API:${requestId}] No video URI in Veo response`);
-    return { success: false, error: "No video URI in response" };
+  const video = generatedVideos[0]?.video;
+  if (!video) {
+    console.error(`[API:${requestId}] No video object in Veo response`);
+    return { success: false, error: "No video in response" };
   }
 
-  // Fetch the video (uses GCP credentials from environment - no API key needed for Vertex AI)
-  console.log(`[API:${requestId}] Fetching video from URI...`);
+  let dataUrl: string;
+
+  // Case 1: video returned as base64 bytes (GA model)
+  if (video.videoBytes) {
+    const mimeType = video.mimeType || "video/mp4";
+    dataUrl = `data:${mimeType};base64,${video.videoBytes}`;
+    const sizeKB = (video.videoBytes.length / 1024).toFixed(1);
+    console.log(`[API:${requestId}] Video received as base64: ${sizeKB}KB`);
+    return {
+      success: true,
+      outputs: [{ type: "video", data: dataUrl }],
+    };
+  }
+
+  // Case 2: video returned as GCS URI (preview model) - fetch and convert
+  const videoUri = video.uri;
+  if (!videoUri) {
+    console.error(`[API:${requestId}] No video URI or bytes in Veo response`);
+    return { success: false, error: "No video data in response" };
+  }
+
+  console.log(`[API:${requestId}] Fetching video from GCS URI...`);
 
   const controller = new AbortController();
   const fetchTimeout = setTimeout(() => controller.abort(), 60_000);
@@ -404,7 +424,7 @@ export async function generateWithVertexVideo(
     console.log(`[API:${requestId}] Video downloaded: ${videoSizeMB}MB`);
 
     const base64Video = Buffer.from(videoBuffer).toString("base64");
-    const dataUrl = `data:video/mp4;base64,${base64Video}`;
+    dataUrl = `data:video/mp4;base64,${base64Video}`;
 
     console.log(`[API:${requestId}] SUCCESS - Returning ${videoSizeMB}MB video`);
 
