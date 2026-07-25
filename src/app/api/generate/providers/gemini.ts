@@ -16,6 +16,7 @@ export const MODEL_MAP: Record<ModelType, string> = {
   "nano-banana": "gemini-2.5-flash-image",
   "nano-banana-pro": "gemini-3-pro-image-preview",
   "nano-banana-2": "gemini-3.1-flash-image-preview",
+  "nano-banana-2-lite": "gemini-3.1-flash-lite-image",
 };
 
 /**
@@ -94,6 +95,11 @@ export async function generateWithGemini(
     tools.push({ googleSearch: {} });
   }
 
+  // tools is a field of GenerateContentConfig, not a top-level generateContent param
+  if (tools.length > 0) {
+    config.tools = tools;
+  }
+
   console.log(`[API:${requestId}] Config: ${JSON.stringify(config)}`);
 
   // Make request to Gemini
@@ -108,7 +114,6 @@ export async function generateWithGemini(
       },
     ],
     config,
-    ...(tools.length > 0 && { tools }),
   });
 
   const geminiDuration = Date.now() - geminiStartTime;

@@ -124,12 +124,12 @@ describe("/api/models route", () => {
 
       expect(response.status).toBe(200);
       expect(data.success).toBe(true);
-      // 2 fal models + 7 gemini models (3 image + 4 video, always included)
-      expect(data.models).toHaveLength(9);
+      // 2 fal models + 8 gemini models (4 image + 4 video, always included)
+      expect(data.models).toHaveLength(10);
       expect(data.providers.fal.success).toBe(true);
       expect(data.providers.fal.count).toBe(2);
       expect(data.providers.gemini.success).toBe(true);
-      expect(data.providers.gemini.count).toBe(7);
+      expect(data.providers.gemini.count).toBe(8);
     });
 
     it("GET: should return models from both providers when both keys present", async () => {
@@ -156,8 +156,8 @@ describe("/api/models route", () => {
 
       expect(response.status).toBe(200);
       expect(data.success).toBe(true);
-      // 1 replicate + 1 fal + 7 gemini models (always included)
-      expect(data.models).toHaveLength(9);
+      // 1 replicate + 1 fal + 8 gemini models (always included)
+      expect(data.models).toHaveLength(10);
       expect(data.providers.replicate.success).toBe(true);
       expect(data.providers.fal.success).toBe(true);
       expect(data.providers.gemini.success).toBe(true);
@@ -445,8 +445,8 @@ describe("/api/models route", () => {
 
       expect(response.status).toBe(200);
       expect(data.success).toBe(true);
-      // 1 fal + 7 gemini models (always included)
-      expect(data.models).toHaveLength(8);
+      // 1 fal + 8 gemini models (always included)
+      expect(data.models).toHaveLength(9);
       expect(data.providers.replicate.success).toBe(false);
       expect(data.providers.fal.success).toBe(true);
       expect(data.providers.gemini.success).toBe(true);
@@ -684,8 +684,8 @@ describe("/api/models route", () => {
       const data = await response.json();
 
       expect(response.status).toBe(200);
-      // 4 fal models + 7 gemini models (always included)
-      expect(data.models).toHaveLength(11);
+      // 4 fal models + 8 gemini models (always included)
+      expect(data.models).toHaveLength(12);
       expect(data.models.find((m: { id: string }) => m.id === "fal-ai/flux")?.capabilities).toEqual(["text-to-image"]);
       expect(data.models.find((m: { id: string }) => m.id === "fal-ai/img2img")?.capabilities).toEqual(["image-to-image"]);
       expect(data.models.find((m: { id: string }) => m.id === "fal-ai/t2v")?.capabilities).toEqual(["text-to-video"]);
@@ -712,8 +712,8 @@ describe("/api/models route", () => {
       const data = await response.json();
 
       expect(response.status).toBe(200);
-      // 1 fal text-to-image + 1 fal text-to-speech (mapped to text-to-audio) + 7 gemini models (always included)
-      expect(data.models).toHaveLength(9);
+      // 1 fal text-to-image + 1 fal text-to-speech (mapped to text-to-audio) + 8 gemini models (always included)
+      expect(data.models).toHaveLength(10);
       expect(data.models.find((m: { id: string }) => m.id === "fal-ai/flux")).toBeDefined();
       expect(data.models.find((m: { id: string }) => m.id === "fal-ai/tts")?.capabilities).toEqual(["text-to-audio"]);
     });
@@ -754,25 +754,216 @@ describe("/api/models route", () => {
       expect(data.models[0].name).toBe("Alpha");
       expect(data.models[1].provider).toBe("fal");
       expect(data.models[1].name).toBe("Zebra");
-      // Gemini models: 3 image + 4 video, sorted by name
+      // Gemini models: 4 image + 4 video, sorted by name
       expect(data.models[2].provider).toBe("gemini");
       expect(data.models[2].name).toBe("Nano Banana");
       expect(data.models[3].provider).toBe("gemini");
       expect(data.models[3].name).toBe("Nano Banana 2");
       expect(data.models[4].provider).toBe("gemini");
-      expect(data.models[4].name).toBe("Nano Banana Pro");
+      expect(data.models[4].name).toBe("Nano Banana 2 Lite");
       expect(data.models[5].provider).toBe("gemini");
-      expect(data.models[5].name).toBe("Veo 3.1");
+      expect(data.models[5].name).toBe("Nano Banana Pro");
       expect(data.models[6].provider).toBe("gemini");
-      expect(data.models[6].name).toBe("Veo 3.1 Fast");
+      expect(data.models[6].name).toBe("Veo 3.1");
       expect(data.models[7].provider).toBe("gemini");
-      expect(data.models[7].name).toBe("Veo 3.1 Fast I2V");
+      expect(data.models[7].name).toBe("Veo 3.1 Fast");
       expect(data.models[8].provider).toBe("gemini");
-      expect(data.models[8].name).toBe("Veo 3.1 I2V");
-      expect(data.models[9].provider).toBe("replicate");
-      expect(data.models[9].name).toBe("alpha");
+      expect(data.models[8].name).toBe("Veo 3.1 Fast I2V");
+      expect(data.models[9].provider).toBe("gemini");
+      expect(data.models[9].name).toBe("Veo 3.1 I2V");
       expect(data.models[10].provider).toBe("replicate");
-      expect(data.models[10].name).toBe("zebra");
+      expect(data.models[10].name).toBe("alpha");
+      expect(data.models[11].provider).toBe("replicate");
+      expect(data.models[11].name).toBe("zebra");
+    });
+  });
+
+  describe("Replicate fetch-by-id fallback", () => {
+    it("GET: resolves an exact owner/name that isn't in the paginated catalogue", async () => {
+      process.env.REPLICATE_API_KEY = "test-key";
+
+      mockFetch.mockImplementation((url: string) => {
+        // Direct single-model lookup (checked first — more specific path)
+        if (url.includes("/models/topazlabs/video-upscale")) {
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve({
+              owner: "topazlabs",
+              name: "video-upscale",
+              description: "Professional-grade video upscaling powered by AI.",
+              visibility: "public",
+              run_count: 100,
+            }),
+          });
+        }
+        // Bulk catalogue list — deliberately does NOT include the topaz model
+        if (url.includes("replicate.com")) {
+          return Promise.resolve(
+            createReplicateResponse([
+              { owner: "stability-ai", name: "sdxl", description: "SDXL model" },
+            ])
+          );
+        }
+        return Promise.reject(new Error("Unknown URL"));
+      });
+
+      const request = createMockGetRequest({ provider: "replicate", search: "topazlabs/video-upscale" });
+      const response = await GET(request);
+      const data = await response.json();
+
+      expect(response.status).toBe(200);
+      expect(data.success).toBe(true);
+      const found = data.models.find((m: { id: string }) => m.id === "topazlabs/video-upscale");
+      expect(found).toBeDefined();
+      // A video upscaler must land under a video capability (visible in the Video node)
+      expect(found.capabilities).toContain("image-to-video");
+      // The direct lookup endpoint must have been hit
+      expect(
+        mockFetch.mock.calls.some((c: unknown[]) => String(c[0]).includes("/models/topazlabs/video-upscale"))
+      ).toBe(true);
+    });
+
+    it("GET: a non-existent owner/name 404s gracefully without failing the request", async () => {
+      process.env.REPLICATE_API_KEY = "test-key";
+
+      mockFetch.mockImplementation((url: string) => {
+        if (url.includes("/models/ghost/missing-model")) {
+          return Promise.resolve({ ok: false, status: 404, json: () => Promise.resolve({}) });
+        }
+        if (url.includes("replicate.com")) {
+          return Promise.resolve(
+            createReplicateResponse([
+              { owner: "stability-ai", name: "sdxl", description: "SDXL model" },
+            ])
+          );
+        }
+        return Promise.reject(new Error("Unknown URL"));
+      });
+
+      const request = createMockGetRequest({ provider: "replicate", search: "ghost/missing-model" });
+      const response = await GET(request);
+      const data = await response.json();
+
+      expect(response.status).toBe(200);
+      expect(data.success).toBe(true);
+      expect(data.models.find((m: { id: string }) => m.id === "ghost/missing-model")).toBeUndefined();
+    });
+  });
+
+  describe("Replicate server-side search", () => {
+    it("GET: finds a model by name fragment via Replicate search even when not in the paginated list", async () => {
+      process.env.REPLICATE_API_KEY = "test-key";
+
+      mockFetch.mockImplementation((url: string) => {
+        // Server-side search endpoint (/v1/search?query=...) — checked first
+        if (url.includes("/search?query=")) {
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve({
+              results: [
+                {
+                  model: {
+                    owner: "topazlabs",
+                    name: "video-upscale",
+                    description: "Professional-grade video upscaling powered by AI.",
+                    visibility: "public",
+                    run_count: 50,
+                  },
+                },
+              ],
+            }),
+          });
+        }
+        // Bulk catalogue list — deliberately does NOT include the topaz model
+        if (url.includes("replicate.com")) {
+          return Promise.resolve(
+            createReplicateResponse([
+              { owner: "stability-ai", name: "sdxl", description: "SDXL model" },
+            ])
+          );
+        }
+        return Promise.reject(new Error("Unknown URL"));
+      });
+
+      // A plain fragment (no "/") — only server-side search can surface it
+      const request = createMockGetRequest({ provider: "replicate", search: "topaz" });
+      const response = await GET(request);
+      const data = await response.json();
+
+      expect(response.status).toBe(200);
+      const found = data.models.find((m: { id: string }) => m.id === "topazlabs/video-upscale");
+      expect(found).toBeDefined();
+      expect(found.capabilities).toContain("image-to-video");
+    });
+
+    it("GET: a failing search is non-fatal — list results still return", async () => {
+      process.env.REPLICATE_API_KEY = "test-key";
+
+      mockFetch.mockImplementation((url: string) => {
+        if (url.includes("/search?query=")) {
+          return Promise.resolve({ ok: false, status: 500, json: () => Promise.resolve({}) });
+        }
+        if (url.includes("replicate.com")) {
+          return Promise.resolve(
+            createReplicateResponse([
+              { owner: "black-forest", name: "flux", description: "Flux model" },
+            ])
+          );
+        }
+        return Promise.reject(new Error("Unknown URL"));
+      });
+
+      const request = createMockGetRequest({ provider: "replicate", search: "flux" });
+      const response = await GET(request);
+      const data = await response.json();
+
+      expect(response.status).toBe(200);
+      expect(data.success).toBe(true);
+      expect(data.models.find((m: { id: string }) => m.id === "black-forest/flux")).toBeDefined();
+    });
+
+    it("GET: runs the full search even when the cached list already has several matches", async () => {
+      process.env.REPLICATE_API_KEY = "test-key";
+
+      let searchApiCalled = false;
+      mockFetch.mockImplementation((url: string) => {
+        if (url.includes("/search?query=")) {
+          searchApiCalled = true;
+          // Search surfaces a model that is NOT in the cached list
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve({
+              results: [
+                { model: { owner: "obscure", name: "flux-rare", description: "rare flux", visibility: "public", run_count: 1 } },
+              ],
+            }),
+          });
+        }
+        if (url.includes("replicate.com")) {
+          // Local list already has several "flux" matches
+          return Promise.resolve(
+            createReplicateResponse([
+              { owner: "a", name: "flux-1", description: "flux" },
+              { owner: "b", name: "flux-2", description: "flux" },
+              { owner: "c", name: "flux-3", description: "flux" },
+              { owner: "d", name: "flux-4", description: "flux" },
+              { owner: "e", name: "flux-5", description: "flux" },
+              { owner: "f", name: "flux-6", description: "flux" },
+            ])
+          );
+        }
+        return Promise.reject(new Error("Unknown URL"));
+      });
+
+      const request = createMockGetRequest({ provider: "replicate", search: "flux" });
+      const response = await GET(request);
+      const data = await response.json();
+
+      expect(response.status).toBe(200);
+      // Full search must run despite the local list already having matches...
+      expect(searchApiCalled).toBe(true);
+      // ...and surface the model that only the search API knew about.
+      expect(data.models.find((m: { id: string }) => m.id === "obscure/flux-rare")).toBeDefined();
     });
   });
 });

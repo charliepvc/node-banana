@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState, useEffect, DragEvent, useMemo } from "react";
+import { useCallback, useRef, useState, useEffect, DragEvent, useMemo, type ComponentType } from "react";
 import {
   ReactFlow,
   Background,
@@ -15,6 +15,7 @@ import {
   Node,
   OnSelectionChangeParams,
   ViewportPortal,
+  useStore,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 
@@ -43,6 +44,9 @@ import {
   EaseCurveNode,
   VideoTrimNode,
   VideoFrameGrabNode,
+  RemoveBackgroundNode,
+  ImageResizeNode,
+  GifEncoderNode,
   RouterNode,
   SwitchNode,
   ConditionalSwitchNode,
@@ -52,6 +56,7 @@ import {
 const GLBViewerNode = dynamic(() => import("./nodes/GLBViewerNode").then(mod => ({ default: mod.GLBViewerNode })), { ssr: false });
 import { EditableEdge, ReferenceEdge, SharedEdgeGradients } from "./edges";
 import { ConnectionDropMenu, MenuAction } from "./ConnectionDropMenu";
+import { NodeSearchMenu } from "./NodeSearchMenu";
 import { MultiSelectToolbar } from "./MultiSelectToolbar";
 import { EdgeToolbar } from "./EdgeToolbar";
 import { GlobalImageHistory } from "./GlobalImageHistory";
@@ -72,18 +77,20 @@ import { PromptConstructorEditorModal } from "./modals/PromptConstructorEditorMo
 import { resolveTextSourcesThroughRouters } from "@/store/utils/connectedInputs";
 import { wouldCreateCycle } from "@/store/utils/executionUtils";
 import { parseVarTags } from "@/utils/parseVarTags";
-import { AnnotationModal } from "./AnnotationModal";
+import { ErrorBoundary } from "./ErrorBoundary";
 import { ModelSearchDialog } from "./modals/ModelSearchDialog";
 import { LLMFallbackPopover } from "./nodes/LLMFallbackPopover";
 import { browseRegistry } from "@/utils/browseRegistry";
 import { useInlineParameters } from "@/hooks/useInlineParameters";
-import { SplitGridSettingsModal } from "./SplitGridSettingsModal";
+import { useWheelPanZoom } from "@/hooks/useWheelPanZoom";
+import { selectCanvasOverview, setCanvasPanningClass } from "@/utils/canvasPerformance";
+import { SplitGridTemplateModal } from "./splitgrid/SplitGridTemplateModal";
 import { createPortal } from "react-dom";
 import { useAnnotationStore } from "@/store/annotationStore";
 import { TutorialOverlay } from "./onboarding/TutorialOverlay";
 import { useFTUXStore } from "@/store/ftuxStore";
 
-const nodeTypes: NodeTypes = {
+const rawNodeTypes: NodeTypes = {
   imageInput: ImageInputNode,
   audioInput: AudioInputNode,
   videoInput: VideoInputNode,
@@ -104,16 +111,96 @@ const nodeTypes: NodeTypes = {
   easeCurve: EaseCurveNode,
   videoTrim: VideoTrimNode,
   videoFrameGrab: VideoFrameGrabNode,
+  removeBackground: RemoveBackgroundNode,
+  imageResize: ImageResizeNode,
+  gifEncoder: GifEncoderNode,
   router: RouterNode,
   switch: SwitchNode,
   conditionalSwitch: ConditionalSwitchNode,
   glbViewer: GLBViewerNode,
 };
 
+// Wrap every node component in a per-node error boundary so a single
+// throwing node (e.g. malformed data from a loaded workflow) renders a small
+// fallback card instead of unmounting the entire canvas/app.
+const withNodeErrorBoundary = (
+  type: string,
+  NodeComponent: ComponentType<Record<string, unknown>>
+): ComponentType<Record<string, unknown>> => {
+  const Wrapped = (props: Record<string, unknown>) => (
+    <ErrorBoundary label={type}>
+      <NodeComponent {...props} />
+    </ErrorBoundary>
+  );
+  Wrapped.displayName = `NodeErrorBoundary(${type})`;
+  return Wrapped;
+};
+
+const nodeTypes: NodeTypes = Object.fromEntries(
+  Object.entries(rawNodeTypes).map(([type, NodeComponent]) => [
+    type,
+    withNodeErrorBoundary(
+      type,
+      NodeComponent as ComponentType<Record<string, unknown>>
+    ),
+  ])
+) as NodeTypes;
+
 const edgeTypes: EdgeTypes = {
   editable: EditableEdge,
   reference: ReferenceEdge,
 };
+
+const OVERVIEW_EDGES: Edge[] = [];
+const MINIMAP_GEOMETRY = {
+  width: 200,
+  height: 150,
+  margin: 15,
+  controlInset: 8,
+  controlSize: 28,
+} as const;
+
+const MINIMAP_CLOSE_POSITION = {
+  right: MINIMAP_GEOMETRY.margin + MINIMAP_GEOMETRY.controlInset,
+  bottom:
+    MINIMAP_GEOMETRY.margin +
+    MINIMAP_GEOMETRY.height -
+    MINIMAP_GEOMETRY.controlInset -
+    MINIMAP_GEOMETRY.controlSize,
+} as const;
+
+function getMiniMapNodeColor(node: Node): string {
+  switch (node.type) {
+    case "imageInput": return "#3b82f6";
+    case "audioInput": return "#a78bfa";
+    case "videoInput": return "#c084fc";
+    case "annotation": return "#8b5cf6";
+    case "prompt": return "#f97316";
+    case "array": return "#a3e635";
+    case "promptConstructor": return "#f472b6";
+    case "nanoBanana": return "#22c55e";
+    case "generateVideo": return "#9333ea";
+    case "generate3d": return "#fb923c";
+    case "generateAudio": return "#d946ef";
+    case "llmGenerate": return "#06b6d4";
+    case "splitGrid": return "#f59e0b";
+    case "output": return "#ef4444";
+    case "outputGallery": return "#ec4899";
+    case "imageCompare": return "#14b8a6";
+    case "videoStitch": return "#f97316";
+    case "easeCurve": return "#bef264";
+    case "videoTrim": return "#60a5fa";
+    case "videoFrameGrab": return "#38bdf8";
+    case "removeBackground": return "#2dd4bf";
+    case "imageResize": return "#0d9488";
+    case "gifEncoder": return "#f472b6";
+    case "router": return "#6b7280";
+    case "switch": return "#8b5cf6";
+    case "conditionalSwitch": return "#06b6d4";
+    case "glbViewer": return "#0ea5e9";
+    default: return "#94a3b8";
+  }
+}
 
 // Connection validation rules
 // - Image handles (green) can only connect to image handles
@@ -160,7 +247,7 @@ const getNodeHandles = (nodeType: string): { inputs: string[]; outputs: string[]
     case "nanoBanana":
       return { inputs: ["image", "text"], outputs: ["image"] };
     case "generateVideo":
-      return { inputs: ["image", "text", "audio"], outputs: ["video"] };
+      return { inputs: ["image", "video", "text", "audio"], outputs: ["video"] };
     case "generate3d":
       return { inputs: ["image", "text"], outputs: ["3d"] };
     case "generateAudio":
@@ -183,6 +270,11 @@ const getNodeHandles = (nodeType: string): { inputs: string[]; outputs: string[]
       return { inputs: ["video"], outputs: ["video"] };
     case "videoFrameGrab":
       return { inputs: ["video"], outputs: ["image"] };
+    case "removeBackground":
+    case "imageResize":
+      return { inputs: ["image"], outputs: ["image"] };
+    case "gifEncoder":
+      return { inputs: ["image"], outputs: ["image"] };
     case "router":
       return { inputs: ["image", "text", "video", "audio", "3d", "easeCurve", "generic-input"], outputs: ["image", "text", "video", "audio", "3d", "easeCurve", "generic-output"] };
     case "switch":
@@ -210,73 +302,6 @@ interface ConnectionDropState {
 
 // Detect if running on macOS for platform-specific trackpad behavior
 const isMacOS = typeof navigator !== 'undefined' && /Mac|iPod|iPhone|iPad/.test(navigator.platform);
-
-// Detect if a wheel event is from a mouse (vs trackpad)
-const isMouseWheel = (event: WheelEvent): boolean => {
-  // Mouse scroll wheel typically uses deltaMode 1 (lines) or has large discrete deltas
-  // Trackpad uses deltaMode 0 (pixels) with smaller, smoother deltas
-  if (event.deltaMode === 1) return true; // DOM_DELTA_LINE = mouse
-
-  // Fallback: large delta values suggest mouse wheel
-  const threshold = 50;
-  return Math.abs(event.deltaY) >= threshold &&
-         Math.abs(event.deltaY) % 40 === 0; // Mouse deltas often in multiples
-};
-
-// Check if an element can scroll and has room to scroll in the given direction
-const canElementScroll = (element: HTMLElement, deltaX: number, deltaY: number): boolean => {
-  const style = window.getComputedStyle(element);
-  const overflowY = style.overflowY;
-  const overflowX = style.overflowX;
-
-  const canScrollY = overflowY === 'auto' || overflowY === 'scroll';
-  const canScrollX = overflowX === 'auto' || overflowX === 'scroll';
-
-  // Check if there's room to scroll in the delta direction
-  if (canScrollY && deltaY !== 0) {
-    const hasVerticalScroll = element.scrollHeight > element.clientHeight;
-    if (hasVerticalScroll) {
-      // Check if we can scroll further in the delta direction
-      if (deltaY > 0 && element.scrollTop < element.scrollHeight - element.clientHeight) {
-        return true; // Can scroll down
-      }
-      if (deltaY < 0 && element.scrollTop > 0) {
-        return true; // Can scroll up
-      }
-    }
-  }
-
-  if (canScrollX && deltaX !== 0) {
-    const hasHorizontalScroll = element.scrollWidth > element.clientWidth;
-    if (hasHorizontalScroll) {
-      if (deltaX > 0 && element.scrollLeft < element.scrollWidth - element.clientWidth) {
-        return true; // Can scroll right
-      }
-      if (deltaX < 0 && element.scrollLeft > 0) {
-        return true; // Can scroll left
-      }
-    }
-  }
-
-  return false;
-};
-
-// Find if the target element or any ancestor is scrollable
-const findScrollableAncestor = (target: HTMLElement, deltaX: number, deltaY: number): HTMLElement | null => {
-  let current: HTMLElement | null = target;
-
-  while (current && !current.classList.contains('react-flow')) {
-    // Check for nowheel class (React Flow convention for elements that should handle their own scroll)
-    if (current.classList.contains('nowheel') || current.tagName === 'TEXTAREA') {
-      if (canElementScroll(current, deltaX, deltaY)) {
-        return current;
-      }
-    }
-    current = current.parentElement;
-  }
-
-  return null;
-};
 
 /** Shared ref so child components (BaseNode) can check panning state without re-rendering */
 export const isPanningRef = { current: false };
@@ -316,13 +341,19 @@ export function WorkflowCanvas() {
   const clearWorkflow = useWorkflowStore((state) => state.clearWorkflow);
   const setHoveredNodeId = useWorkflowStore((state) => state.setHoveredNodeId);
   const openAnnotationModal = useAnnotationStore((state) => state.openModal);
-  const { screenToFlowPosition, getViewport, zoomIn, zoomOut, setViewport, setCenter } = useReactFlow();
+  const { screenToFlowPosition, getViewport, setCenter } = useReactFlow();
+  const isCanvasOverview = useStore(selectCanvasOverview);
   const { show: showToast } = useToast();
   const [isDragOver, setIsDragOver] = useState(false);
   const [dropType, setDropType] = useState<"image" | "audio" | "workflow" | "node" | null>(null);
   const [connectionDrop, setConnectionDrop] = useState<ConnectionDropState | null>(null);
+  // Searchable "add node" menu shown on double-clicking the empty canvas.
+  const [nodeSearchMenu, setNodeSearchMenu] = useState<
+    { position: { x: number; y: number }; flowPosition: { x: number; y: number } } | null
+  >(null);
   const [isSplitting, setIsSplitting] = useState(false);
   const [isChatOpen, setIsChatOpen] = useState(false);
+  const [isMinimapVisible, setIsMinimapVisible] = useState(true);
   const [isBuildingWorkflow, setIsBuildingWorkflow] = useState(false);
   const [showNewProjectSetup, setShowNewProjectSetup] = useState(false);
   const [expandingNode, setExpandingNode] = useState<{ id: string; type: string } | null>(null);
@@ -353,6 +384,16 @@ export function WorkflowCanvas() {
     setLockedFeatures(currentState.lockedFeatures);
 
     return unsubscribe;
+  }, []);
+
+  useEffect(() => {
+    const wrapper = reactFlowWrapper.current;
+    return () => {
+      document.documentElement.classList.remove("canvas-interacting");
+      if (wrapper) setCanvasPanningClass(false, wrapper);
+      isPanningRef.current = false;
+      isDraggingNodeRef.current = false;
+    };
   }, []);
 
   // Detect if canvas is empty for showing quickstart
@@ -469,6 +510,9 @@ export function WorkflowCanvas() {
     easeCurve: 'Ease Curve',
     videoTrim: 'Video Trim',
     videoFrameGrab: 'Frame Grab',
+    removeBackground: 'Remove Background',
+    imageResize: 'Image Resize',
+    gifEncoder: 'GIF Encoder',
     router: 'Router',
     switch: 'Switch',
     conditionalSwitch: 'Conditional Switch',
@@ -887,6 +931,18 @@ export function WorkflowCanvas() {
           return null;
         }
 
+        // GifEncoder has dynamic indexed image input handles (image-0, image-1, ...)
+        if (node.type === "gifEncoder" && needInput && handleType === "image") {
+          for (let i = 0; i < 50; i++) {
+            const candidateHandle = `image-${i}`;
+            const isOccupied = edges.some(
+              (edge) => edge.target === node.id && edge.targetHandle === candidateHandle
+            ) || batchUsed?.has(candidateHandle);
+            if (!isOccupied) return candidateHandle;
+          }
+          return null;
+        }
+
         // Router accepts any type — use typed handle if exists, otherwise generic
         if (node.type === "router" && needInput) {
           // Router accepts any type — use typed handle if that type is already active
@@ -1111,6 +1167,8 @@ export function WorkflowCanvas() {
         return (node.data as { outputImage: string | null }).outputImage;
       case "nanoBanana":
         return (node.data as { outputImage: string | null }).outputImage;
+      case "removeBackground":
+        return (node.data as { outputImage: string | null }).outputImage;
       default:
         return null;
     }
@@ -1147,25 +1205,33 @@ export function WorkflowCanvas() {
     }
   }, [loadWorkflow, showToast, captureSnapshot]);
 
-  // Create lightweight workflow state for chat (strip base64 images)
-  const chatWorkflowState = useMemo(() => {
-    const strippedNodes = stripBinaryData(nodes);
-    return {
-      nodes: strippedNodes.map(n => ({
+  // Create lightweight workflow state for chat (strip base64 images).
+  // Keep a ref to the raw nodes/edges and expose the stripped payload lazily via
+  // getters, so the expensive stripBinaryData/remap only runs when the value is
+  // actually read (at chat send time, when ChatPanel serializes it) rather than
+  // on every drag frame or execution-status tick.
+  const chatWorkflowRawRef = useRef({ nodes, edges });
+  chatWorkflowRawRef.current = { nodes, edges };
+  const chatWorkflowState = useMemo(() => ({
+    get nodes() {
+      const strippedNodes = stripBinaryData(chatWorkflowRawRef.current.nodes);
+      return strippedNodes.map(n => ({
         id: n.id,
         type: n.type,
         position: n.position,
         data: n.data,
-      })),
-      edges: edges.map(e => ({
+      }));
+    },
+    get edges() {
+      return chatWorkflowRawRef.current.edges.map(e => ({
         id: e.id,
         source: e.source,
         target: e.target,
         sourceHandle: e.sourceHandle || undefined,
         targetHandle: e.targetHandle || undefined,
-      })),
-    };
-  }, [nodes, edges]);
+      }));
+    },
+  }), []);
 
   // Compute selected node IDs for chat context scoping
   const selectedNodeIds = useMemo(() => nodes.filter(n => n.selected).map(n => n.id), [nodes]);
@@ -1252,14 +1318,20 @@ export function WorkflowCanvas() {
           sourceHandleIdForNewNode = "default";
         }
       } else if (handleType === "image") {
-        if (nodeType === "annotation" || nodeType === "output" || nodeType === "splitGrid" || nodeType === "outputGallery" || nodeType === "imageCompare") {
+        if (nodeType === "annotation" || nodeType === "output" || nodeType === "splitGrid" || nodeType === "outputGallery" || nodeType === "imageCompare" || nodeType === "removeBackground") {
           targetHandleId = "image";
-          // annotation also has an image output
-          if (nodeType === "annotation") {
+          // annotation and removeBackground also have an image output
+          if (nodeType === "annotation" || nodeType === "removeBackground") {
             sourceHandleIdForNewNode = "image";
           }
         } else if (nodeType === "nanoBanana" || nodeType === "generateVideo") {
           targetHandleId = "image";
+        } else if (nodeType === "imageResize") {
+          targetHandleId = "image";
+          sourceHandleIdForNewNode = "image";
+        } else if (nodeType === "gifEncoder") {
+          targetHandleId = "image-0";
+          sourceHandleIdForNewNode = "image";
         } else if (nodeType === "imageInput") {
           sourceHandleIdForNewNode = "image";
         }
@@ -1418,6 +1490,56 @@ export function WorkflowCanvas() {
     setConnectionDrop(null);
   }, []);
 
+  // Open the searchable "add node" menu at a screen position (double-click or
+  // right-click on the empty canvas).
+  const openNodeSearchMenu = useCallback(
+    (clientX: number, clientY: number) => {
+      if (isModalOpen || tutorialActive) return;
+      setConnectionDrop(null);
+      setNodeSearchMenu({
+        position: { x: clientX, y: clientY },
+        flowPosition: screenToFlowPosition({ x: clientX, y: clientY }),
+      });
+    },
+    [isModalOpen, tutorialActive, screenToFlowPosition]
+  );
+
+  // Double-clicking the empty canvas opens the node search menu.
+  const handlePaneDoubleClick = useCallback(
+    (event: React.MouseEvent) => {
+      // Only react to double-clicks on the empty pane, not on a node/edge/control.
+      const target = event.target as HTMLElement;
+      if (!target.classList?.contains("react-flow__pane")) return;
+      event.preventDefault();
+      openNodeSearchMenu(event.clientX, event.clientY);
+    },
+    [openNodeSearchMenu]
+  );
+
+  // Right-clicking the empty canvas opens the node search menu (instead of the
+  // browser context menu).
+  const handlePaneContextMenu = useCallback(
+    (event: React.MouseEvent | MouseEvent) => {
+      event.preventDefault();
+      openNodeSearchMenu(event.clientX, event.clientY);
+    },
+    [openNodeSearchMenu]
+  );
+
+  const handleNodeSearchSelect = useCallback(
+    (type: NodeType) => {
+      if (nodeSearchMenu) {
+        addNode(type, nodeSearchMenu.flowPosition);
+      }
+      setNodeSearchMenu(null);
+    },
+    [nodeSearchMenu, addNode]
+  );
+
+  const handleCloseNodeSearch = useCallback(() => {
+    setNodeSearchMenu(null);
+  }, []);
+
   // Get copy/paste functions and clipboard from store
   const copySelectedNodes = useWorkflowStore((state) => state.copySelectedNodes);
   const pasteNodes = useWorkflowStore((state) => state.pasteNodes);
@@ -1426,80 +1548,9 @@ export function WorkflowCanvas() {
   const undo = useWorkflowStore((state) => state.undo);
   const redo = useWorkflowStore((state) => state.redo);
 
-  // Add non-passive wheel listener to handle zoom/pan and prevent browser navigation
-  // This replaces the onWheel prop which is passive by default and can't preventDefault
-  useEffect(() => {
-    const wrapper = reactFlowWrapper.current;
-    if (!wrapper) return;
-
-    const handleWheelNonPassive = (event: WheelEvent) => {
-      // Skip if modal is open
-      if (isModalOpen) return;
-
-      // Check if scrolling over a scrollable element
-      const target = event.target as HTMLElement;
-      const scrollableElement = findScrollableAncestor(target, event.deltaX, event.deltaY);
-      if (scrollableElement) return;
-
-      const { zoomMode } = canvasNavigationSettings;
-
-      // Check if zoom should be triggered based on settings
-      const shouldZoom =
-        zoomMode === "scroll" ||
-        (zoomMode === "altScroll" && event.altKey) ||
-        (zoomMode === "ctrlScroll" && (event.ctrlKey || event.metaKey));
-
-      // Pinch gesture (ctrlKey + trackpad) always zooms regardless of settings
-      if (event.ctrlKey && !event.altKey) {
-        event.preventDefault();
-        if (event.deltaY < 0) zoomIn();
-        else zoomOut();
-        return;
-      }
-
-      // On macOS, differentiate trackpad from mouse
-      if (isMacOS) {
-        if (isMouseWheel(event)) {
-          // Mouse wheel → zoom if settings allow
-          if (shouldZoom) {
-            event.preventDefault();
-            if (event.deltaY < 0) zoomIn();
-            else zoomOut();
-          }
-        } else {
-          // Trackpad scroll
-          if (shouldZoom) {
-            // Zoom
-            event.preventDefault();
-            if (event.deltaY < 0) zoomIn();
-            else zoomOut();
-          } else {
-            // Pan (also prevent horizontal swipe navigation)
-            event.preventDefault();
-            const viewport = getViewport();
-            setViewport({
-              x: viewport.x - event.deltaX,
-              y: viewport.y - event.deltaY,
-              zoom: viewport.zoom,
-            });
-          }
-        }
-        return;
-      }
-
-      // Non-macOS
-      if (shouldZoom) {
-        event.preventDefault();
-        if (event.deltaY < 0) zoomIn();
-        else zoomOut();
-      }
-    };
-
-    wrapper.addEventListener('wheel', handleWheelNonPassive, { passive: false });
-    return () => {
-      wrapper.removeEventListener('wheel', handleWheelNonPassive);
-    };
-  }, [isModalOpen, zoomIn, zoomOut, getViewport, setViewport, canvasNavigationSettings]);
+  // Wheel-based pan/zoom, honoring the user's navigation settings. Disabled
+  // while a modal is open (the modal's mini canvas drives its own).
+  useWheelPanZoom(reactFlowWrapper, canvasNavigationSettings, !isModalOpen);
 
   // Keyboard shortcuts for copy/paste and stacking selected nodes
   const handleKeyDown = useCallback((event: KeyboardEvent) => {
@@ -1521,6 +1572,8 @@ export function WorkflowCanvas() {
     // Handle workflow execution (Ctrl/Cmd + Enter)
     if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
       event.preventDefault();
+      // Resume-from-pause is handled inside executeWorkflow when no explicit
+      // start node is given.
       executeWorkflow();
       return;
     }
@@ -1591,33 +1644,7 @@ export function WorkflowCanvas() {
           event.preventDefault();
           const { centerX, centerY } = getViewportCenter();
           // Offset by half the default node dimensions to center it
-          const defaultDimensions: Record<NodeType, { width: number; height: number }> = {
-            imageInput: { width: 300, height: 280 },
-            audioInput: { width: 300, height: 200 },
-            videoInput: { width: 300, height: 280 },
-            annotation: { width: 300, height: 280 },
-            prompt: { width: 320, height: 220 },
-            array: { width: 360, height: 360 },
-            promptConstructor: { width: 340, height: 280 },
-            nanoBanana: { width: 300, height: 300 },
-            generateVideo: { width: 300, height: 300 },
-            generate3d: { width: 300, height: 300 },
-            generateAudio: { width: 300, height: 280 },
-            llmGenerate: { width: 320, height: 360 },
-            splitGrid: { width: 300, height: 320 },
-            output: { width: 320, height: 320 },
-            outputGallery: { width: 320, height: 360 },
-            imageCompare: { width: 400, height: 360 },
-            videoStitch: { width: 400, height: 280 },
-            easeCurve: { width: 340, height: 480 },
-            videoTrim: { width: 360, height: 360 },
-            videoFrameGrab: { width: 320, height: 320 },
-            router: { width: 200, height: 80 },
-            switch: { width: 220, height: 120 },
-            conditionalSwitch: { width: 260, height: 180 },
-            glbViewer: { width: 360, height: 380 },
-          };
-          const dims = defaultDimensions[nodeType];
+          const dims = defaultNodeDimensions[nodeType];
           addNode(nodeType, { x: centerX - dims.width / 2, y: centerY - dims.height / 2 });
           return;
         }
@@ -1716,19 +1743,20 @@ export function WorkflowCanvas() {
 
         let currentY = sortedNodes[0].position.y;
 
-        sortedNodes.forEach((node) => {
+        const changes = sortedNodes.map((node) => {
           const nodeHeight = (node.style?.height as number) || (node.measured?.height) || 200;
 
-          onNodesChange([
-            {
-              type: "position",
-              id: node.id,
-              position: { x: alignX, y: currentY },
-            },
-          ]);
+          const change = {
+            type: "position" as const,
+            id: node.id,
+            position: { x: alignX, y: currentY },
+          };
 
           currentY += nodeHeight + STACK_GAP;
+          return change;
         });
+
+        onNodesChange(changes);
       } else if (event.key === "h" || event.key === "H") {
         // Stack horizontally - sort by current x position to maintain relative order
         const sortedNodes = [...selectedNodes].sort((a, b) => a.position.x - b.position.x);
@@ -1738,19 +1766,20 @@ export function WorkflowCanvas() {
 
         let currentX = sortedNodes[0].position.x;
 
-        sortedNodes.forEach((node) => {
+        const changes = sortedNodes.map((node) => {
           const nodeWidth = (node.style?.width as number) || (node.measured?.width) || 220;
 
-          onNodesChange([
-            {
-              type: "position",
-              id: node.id,
-              position: { x: currentX, y: alignY },
-            },
-          ]);
+          const change = {
+            type: "position" as const,
+            id: node.id,
+            position: { x: currentX, y: alignY },
+          };
 
           currentX += nodeWidth + STACK_GAP;
+          return change;
         });
+
+        onNodesChange(changes);
       } else if (event.key === "g" || event.key === "G") {
         // Arrange as grid
         const count = selectedNodes.length;
@@ -1777,21 +1806,21 @@ export function WorkflowCanvas() {
         );
 
         // Position each node in the grid
-        sortedNodes.forEach((node, index) => {
+        const changes = sortedNodes.map((node, index) => {
           const col = index % cols;
           const row = Math.floor(index / cols);
 
-          onNodesChange([
-            {
-              type: "position",
-              id: node.id,
-              position: {
-                x: startX + col * (maxWidth + STACK_GAP),
-                y: startY + row * (maxHeight + STACK_GAP),
-              },
+          return {
+            type: "position" as const,
+            id: node.id,
+            position: {
+              x: startX + col * (maxWidth + STACK_GAP),
+              y: startY + row * (maxHeight + STACK_GAP),
             },
-          ]);
+          };
         });
+
+        onNodesChange(changes);
       }
   }, [nodes, onNodesChange, copySelectedNodes, pasteNodes, clearClipboard, clipboard, getViewport, addNode, updateNodeData, executeWorkflow, setShortcutsDialogOpen, undo, redo]);
 
@@ -2036,7 +2065,9 @@ export function WorkflowCanvas() {
   return (
     <div
       ref={reactFlowWrapper}
-      className={`flex-1 bg-canvas-bg relative ${isDragOver ? "ring-2 ring-inset ring-blue-500" : ""}`}
+      className={`flex-1 bg-canvas-bg relative ${
+        isCanvasOverview ? "canvas-overview" : ""
+      } ${isDragOver ? "ring-2 ring-inset ring-blue-500" : ""}`}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
@@ -2102,21 +2133,23 @@ export function WorkflowCanvas() {
 
       <ReactFlow
         nodes={allNodes}
-        edges={edges}
+        edges={isCanvasOverview ? OVERVIEW_EDGES : edges}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onConnect={handleConnect}
         onConnectEnd={handleConnectEnd}
-        onMoveStart={() => { isPanningRef.current = true; setHoveredNodeId(null); document.documentElement.classList.add("canvas-interacting"); }}
-        onMoveEnd={() => { isPanningRef.current = false; document.documentElement.classList.remove("canvas-interacting"); }}
+        onMoveStart={() => { isPanningRef.current = true; setHoveredNodeId(null); document.documentElement.classList.add("canvas-interacting"); if (reactFlowWrapper.current) setCanvasPanningClass(true, reactFlowWrapper.current); }}
+        onMoveEnd={() => { isPanningRef.current = false; document.documentElement.classList.remove("canvas-interacting"); if (reactFlowWrapper.current) setCanvasPanningClass(false, reactFlowWrapper.current); }}
         onNodeDragStart={() => { isDraggingNodeRef.current = true; document.documentElement.classList.add("canvas-interacting"); }}
         onNodeDragStop={(event, node) => { isDraggingNodeRef.current = false; document.documentElement.classList.remove("canvas-interacting"); handleNodeDragStop(event, node); }}
         onSelectionChange={handleSelectionChange}
+        onDoubleClick={handlePaneDoubleClick}
+        onPaneContextMenu={handlePaneContextMenu}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
         isValidConnection={isValidConnection}
         fitView
-        deleteKeyCode={["Backspace", "Delete"]}
+        deleteKeyCode={isModalOpen ? null : ["Backspace", "Delete"]}
         multiSelectionKeyCode="Shift"
         selectionOnDrag={
           canvasNavigationSettings.selectionMode === "altDrag" || canvasNavigationSettings.selectionMode === "shiftDrag"
@@ -2147,6 +2180,7 @@ export function WorkflowCanvas() {
         nodeClickDistance={5}
         zoomOnScroll={tutorialActive ? false : false}
         zoomOnPinch={tutorialActive ? false : !isModalOpen}
+        zoomOnDoubleClick={false}
         minZoom={0.1}
         maxZoom={4}
         defaultViewport={{ x: 0, y: 0, zoom: 1 }}
@@ -2179,66 +2213,50 @@ export function WorkflowCanvas() {
           className={tutorialActive && lockedFeatures ? "opacity-30 pointer-events-none" : ""}
         />
         <Controls className={`bg-neutral-800 border border-neutral-700 rounded-lg shadow-lg [&>button]:bg-neutral-800 [&>button]:border-neutral-700 [&>button]:fill-neutral-300 [&>button:hover]:bg-neutral-700 [&>button:hover]:fill-neutral-100 ${tutorialActive && lockedFeatures ? "opacity-30 pointer-events-none" : ""}`} />
-        <MiniMap
-          className={`bg-neutral-800 border border-neutral-700 rounded-lg shadow-lg ${tutorialActive && lockedFeatures ? "opacity-30 pointer-events-none" : ""}`}
-          maskColor="rgba(0, 0, 0, 0.6)"
-          pannable
-          zoomable
-          nodeColor={(node) => {
-            switch (node.type) {
-              case "imageInput":
-                return "#3b82f6";
-              case "audioInput":
-                return "#a78bfa";
-              case "videoInput":
-                return "#c084fc"; // purple-400 (video input, distinct from generateVideo's #9333ea)
-              case "annotation":
-                return "#8b5cf6";
-              case "prompt":
-                return "#f97316";
-              case "array":
-                return "#a3e635";
-              case "promptConstructor":
-                return "#f472b6";
-              case "nanoBanana":
-                return "#22c55e";
-              case "generateVideo":
-                return "#9333ea";
-              case "generate3d":
-                return "#fb923c";
-              case "generateAudio":
-                return "#d946ef"; // fuchsia-500 (audio/TTS)
-              case "llmGenerate":
-                return "#06b6d4";
-              case "splitGrid":
-                return "#f59e0b";
-              case "output":
-                return "#ef4444";
-              case "outputGallery":
-                return "#ec4899";
-              case "imageCompare":
-                return "#14b8a6";
-              case "videoStitch":
-                return "#f97316";
-              case "easeCurve":
-                return "#bef264"; // lime-300 (easy-peasy-ease)
-              case "videoTrim":
-                return "#60a5fa"; // blue-400 (trim/cut)
-              case "videoFrameGrab":
-                return "#38bdf8"; // sky-400 (image from video)
-              case "router":
-                return "#6b7280"; // neutral-500 (gray/slate utility theme)
-              case "switch":
-                return "#8b5cf6"; // violet-500 (distinct from Router)
-              case "conditionalSwitch":
-                return "#06b6d4"; // cyan-500 (distinct from Router gray and Switch violet)
-              case "glbViewer":
-                return "#0ea5e9"; // sky-500 (3D viewport)
-              default:
-                return "#94a3b8";
-            }
-          }}
-        />
+        {isMinimapVisible ? (
+          <>
+            <MiniMap
+              className={`bg-neutral-800 border border-neutral-700 rounded-lg shadow-lg ${tutorialActive && lockedFeatures ? "opacity-30 pointer-events-none" : ""}`}
+              style={{
+                width: MINIMAP_GEOMETRY.width,
+                height: MINIMAP_GEOMETRY.height,
+                margin: MINIMAP_GEOMETRY.margin,
+              }}
+              maskColor="rgba(0, 0, 0, 0.6)"
+              pannable
+              zoomable
+              nodeColor={getMiniMapNodeColor}
+            />
+            <button
+              type="button"
+              aria-label="Hide minimap"
+              title="Hide minimap"
+              disabled={tutorialActive && lockedFeatures}
+              onClick={() => setIsMinimapVisible(false)}
+              style={MINIMAP_CLOSE_POSITION}
+              className="nodrag nopan nowheel absolute z-[6] flex h-7 w-7 items-center justify-center rounded-md border border-neutral-600/80 bg-neutral-950/85 text-neutral-400 shadow-sm backdrop-blur-sm transition-colors hover:border-neutral-500 hover:bg-neutral-800 hover:text-neutral-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:cursor-not-allowed"
+            >
+              <svg aria-hidden="true" viewBox="0 0 20 20" className="h-4 w-4" fill="none">
+                <path d="M6 6l8 8M14 6l-8 8" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" />
+              </svg>
+            </button>
+          </>
+        ) : (
+          <button
+            type="button"
+            aria-label="Show minimap"
+            title="Show minimap"
+            disabled={tutorialActive && lockedFeatures}
+            onClick={() => setIsMinimapVisible(true)}
+            style={{ right: MINIMAP_GEOMETRY.margin, bottom: MINIMAP_GEOMETRY.margin }}
+            className={`nodrag nopan nowheel absolute z-[5] flex h-10 w-10 items-center justify-center rounded-lg border border-neutral-700 bg-neutral-800 text-neutral-400 shadow-lg transition-colors hover:border-neutral-600 hover:bg-neutral-700 hover:text-neutral-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:cursor-not-allowed ${tutorialActive && lockedFeatures ? "opacity-30 pointer-events-none" : ""}`}
+          >
+            <svg aria-hidden="true" viewBox="0 0 20 20" className="h-[18px] w-[18px]" fill="none">
+              <rect x="2.5" y="3.5" width="15" height="13" rx="2" stroke="currentColor" strokeWidth="1.5" />
+              <path d="M5.5 7h2v2h-2zM9 7h2v2H9zM12.5 7h2v2h-2zM5.5 10.5h2v2h-2zM9 10.5h5.5v2H9z" fill="currentColor" />
+            </svg>
+          </button>
+        )}
         <ViewportPortal>
           {allNodes.map((node) => {
             // Groups don't get floating headers
@@ -2367,6 +2385,15 @@ export function WorkflowCanvas() {
         />
       )}
 
+      {/* Node search menu (double-click empty canvas) */}
+      {nodeSearchMenu && (
+        <NodeSearchMenu
+          position={nodeSearchMenu.position}
+          onSelect={handleNodeSearchSelect}
+          onClose={handleCloseNodeSearch}
+        />
+      )}
+
       {/* Multi-select toolbar */}
       <MultiSelectToolbar />
 
@@ -2471,7 +2498,7 @@ export function WorkflowCanvas() {
         const node = getNodeById(expandingNode.id);
         if (!node) return null;
         return (
-          <SplitGridSettingsModal
+          <SplitGridTemplateModal
             nodeId={expandingNode.id}
             nodeData={node.data as any}
             onClose={() => setExpandingNode(null)}
@@ -2514,8 +2541,9 @@ export function WorkflowCanvas() {
         />
       )}
 
-      {/* AnnotationModal is globally managed by annotationStore */}
-      <AnnotationModal />
+      {/* AnnotationModal is globally managed by annotationStore and mounted
+          once at the app root (src/app/page.tsx) to avoid duplicate keydown
+          listeners firing shortcuts twice. */}
 
       {/* Tutorial overlay */}
       <TutorialOverlay />

@@ -7,6 +7,7 @@ import { CanvasNavigationSettings, PanMode, ZoomMode, SelectionMode } from "@/ty
 import { EnvStatusResponse } from "@/app/api/env-status/route";
 import { VertexIcon } from "@/components/nodes/VertexIcon";
 import { loadNodeDefaults, saveNodeDefaults, getLastProjectBaseDir, setLastProjectBaseDir } from "@/store/utils/localStorage";
+import { clearFetchCache } from "@/utils/deduplicatedFetch";
 import { ProviderModel } from "@/lib/providers/types";
 import { ModelSearchDialog } from "@/components/modals/ModelSearchDialog";
 import { useInlineParameters } from "@/hooks/useInlineParameters";
@@ -344,6 +345,10 @@ export function ProjectSetupModal({
         updateProviderApiKey(providerId, local.apiKey);
       }
     }
+    // Clear model/schema caches so the next fetch reflects updated provider keys
+    clearFetchCache();
+    localStorage.removeItem("node-banana-models-cache");
+    localStorage.removeItem("node-banana-schema-cache");
     onClose();
   };
 
