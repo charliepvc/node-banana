@@ -163,11 +163,11 @@ export function calculatePredictedCost(
       if (modelId === "nano-banana" || modelId === "gemini-2.5-flash-image") {
         return { unitCost: PRICING["nano-banana"]["1K"], unit: "image" };
       }
-      if (modelId === "nano-banana-pro" || modelId === "gemini-3-pro-image-preview") {
+      if (modelId === "nano-banana-pro" || modelId === "gemini-3-pro-image-preview" || modelId === "gemini-3-pro-image") {
         const res = resolution || "1K";
         return { unitCost: PRICING["nano-banana-pro"][res], unit: "image" };
       }
-      if (modelId === "nano-banana-2" || modelId === "gemini-3.1-flash-image-preview") {
+      if (modelId === "nano-banana-2" || modelId === "gemini-3.1-flash-image-preview" || modelId === "gemini-3.1-flash-image") {
         const res = resolution || "1K";
         return { unitCost: PRICING["nano-banana-2"][res], unit: "image" };
       }

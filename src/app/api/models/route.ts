@@ -602,6 +602,15 @@ const VERTEX_IMAGE_MODELS: ProviderModel[] = [
     pricing: { type: "per-run", amount: 0.067, currency: "USD" },
   },
   {
+    id: "vertex/nano-banana-2-lite",
+    name: "Nano Banana 2 Lite (Vertex)",
+    description: "Lightweight image generation with Gemini 3.1 Flash Lite via Vertex AI. 1K resolution only.",
+    provider: "vertex",
+    capabilities: ["text-to-image", "image-to-image"],
+    coverImage: undefined,
+    pricing: { type: "per-run", amount: 0.034, currency: "USD" },
+  },
+  {
     id: "vertex/nano-banana-pro",
     name: "Nano Banana Pro (Vertex)",
     description: "High-quality image generation with Gemini 3 Pro via Vertex AI. Supports resolution control and Google Search grounding.",
@@ -609,6 +618,15 @@ const VERTEX_IMAGE_MODELS: ProviderModel[] = [
     capabilities: ["text-to-image", "image-to-image"],
     coverImage: undefined,
     pricing: { type: "per-run", amount: 0.134, currency: "USD" },
+  },
+  {
+    id: "vertex/omni-flash",
+    name: "Omni Flash (Vertex)",
+    description: "Multimodal generation with Gemini Omni Flash via Vertex AI.",
+    provider: "vertex",
+    capabilities: ["text-to-image", "image-to-image"],
+    coverImage: undefined,
+    pricing: { type: "per-run", amount: 0.039, currency: "USD" },
   },
 ];
 
