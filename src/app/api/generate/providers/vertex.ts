@@ -42,7 +42,7 @@ function getEffectiveLocation(config: { project: string; location: string }, mod
   // GA Veo models (veo-3.1-generate-preview, veo-3.1-fast-generate-preview) are regional (us-central1)
   const GLOBAL_LOCATION_MODELS = [
     "vertex/nano-banana-pro",             // gemini-3-pro-image
-    "vertex/nano-banana-2",               // gemini-3.1-flash-image
+    // NOTE: nano-banana-2 (gemini-3.1-flash-image) removed from global — try us-central1
   ];
 
   const effectiveLocation = GLOBAL_LOCATION_MODELS.includes(model) ? "global" : config.location;
