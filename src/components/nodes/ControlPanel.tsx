@@ -198,7 +198,7 @@ function GenerateImageControls({ node }: { node: Node }) {
   const updateNodeData = useWorkflowStore((state) => state.updateNodeData);
   const regenerateNode = useWorkflowStore((state) => state.regenerateNode);
   const isRunning = useWorkflowStore((state) => state.isRunning);
-  const { replicateApiKey, kieApiKey, openaiApiKey, replicateEnabled, kieEnabled, openaiEnabled } = useProviderApiKeys();
+  const { replicateApiKey, kieApiKey, openaiApiKey, vertexConfig, replicateEnabled, kieEnabled, openaiEnabled, vertexEnabled } = useProviderApiKeys();
   const [isBrowseDialogOpen, setIsBrowseDialogOpen] = useState(false);
 
   const currentProvider: ProviderType = nodeData.selectedModel?.provider || "gemini";
@@ -208,6 +208,9 @@ function GenerateImageControls({ node }: { node: Node }) {
     const providers: { id: ProviderType; name: string }[] = [];
     providers.push({ id: "gemini", name: "Gemini" });
     providers.push({ id: "fal", name: "fal.ai" });
+    if (vertexEnabled && vertexConfig) {
+      providers.push({ id: "vertex", name: "Vertex AI" });
+    }
     if (replicateEnabled && replicateApiKey) {
       providers.push({ id: "replicate", name: "Replicate" });
     }
@@ -218,7 +221,7 @@ function GenerateImageControls({ node }: { node: Node }) {
       providers.push({ id: "openai", name: "OpenAI" });
     }
     return providers;
-  }, [replicateEnabled, replicateApiKey, kieEnabled, kieApiKey, openaiEnabled, openaiApiKey]);
+  }, [replicateEnabled, replicateApiKey, kieEnabled, kieApiKey, openaiEnabled, openaiApiKey, vertexEnabled, vertexConfig]);
 
   const handleAspectRatioChange = useCallback(
     (e: React.ChangeEvent<HTMLSelectElement>) => {

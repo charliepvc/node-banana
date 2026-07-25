@@ -75,6 +75,7 @@ function getProvidersHash(providers: {
   kie: boolean;
   wavespeed: boolean;
   openai: boolean;
+  vertex: boolean;
 }): string {
   // Fixed order keeps the hash deterministic across renders.
   return [
@@ -83,6 +84,7 @@ function getProvidersHash(providers: {
     providers.kie ? "k" : "",
     providers.wavespeed ? "w" : "",
     providers.openai ? "o" : "",
+    providers.vertex ? "v" : "",
   ].join("");
 }
 
@@ -186,7 +188,7 @@ export function ModelSearchDialog({
     trackModelUsage,
   } = useWorkflowStore();
   // Use stable selector for API keys to prevent unnecessary re-fetches
-  const { replicateApiKey, falApiKey, kieApiKey, wavespeedApiKey, openaiApiKey } = useProviderApiKeys();
+  const { replicateApiKey, falApiKey, kieApiKey, wavespeedApiKey, openaiApiKey, vertexConfig, vertexEnabled } = useProviderApiKeys();
   const { screenToFlowPosition } = useReactFlow();
 
   // State
@@ -244,6 +246,7 @@ export function ModelSearchDialog({
       kie: !!kieApiKey,
       wavespeed: !!wavespeedApiKey,
       openai: !!openaiApiKey,
+      vertex: !!vertexConfig,
     });
     const cacheKey = `${providersHash}:${providerFilter}:${capabilityFilter}:${debouncedSearch}`;
 
@@ -344,7 +347,7 @@ export function ModelSearchDialog({
         setIsLoading(false);
       }
     }
-  }, [debouncedSearch, providerFilter, capabilityFilter, replicateApiKey, falApiKey, kieApiKey, wavespeedApiKey, openaiApiKey]);
+  }, [debouncedSearch, providerFilter, capabilityFilter, replicateApiKey, falApiKey, kieApiKey, wavespeedApiKey, openaiApiKey, vertexConfig]);
 
   // Fetch models when filters change
   useEffect(() => {
@@ -507,12 +510,13 @@ export function ModelSearchDialog({
     if (kieApiKey) providers.add("kie");
     if (wavespeedApiKey) providers.add("wavespeed");
     if (openaiApiKey) providers.add("openai");
+    if (vertexConfig) providers.add("vertex");
     // Server-side keys (from env vars, reported by /api/models)
     for (const p of serverAvailableProviders) {
       providers.add(p as ProviderType);
     }
     return providers;
-  }, [replicateApiKey, kieApiKey, wavespeedApiKey, openaiApiKey, serverAvailableProviders]);
+  }, [replicateApiKey, kieApiKey, wavespeedApiKey, openaiApiKey, vertexConfig, serverAvailableProviders]);
 
   // Reset provider filter if current selection becomes unavailable
   useEffect(() => {
@@ -726,6 +730,19 @@ export function ModelSearchDialog({
                     providerFilter === "gemini"
                       ? "bg-green-500/20 text-green-300"
                       : "text-neutral-400 hover:text-green-300 hover:bg-neutral-700"
+                  }`}
+                >
+                  <GeminiIcon />
+                </button>
+              )}
+              {availableProviders.has("vertex") && (
+                <button
+                  onClick={() => setProviderFilter("vertex")}
+                  title="Vertex AI"
+                  className={`p-2 rounded transition-colors ${
+                    providerFilter === "vertex"
+                      ? "bg-blue-500/20 text-blue-300"
+                      : "text-neutral-400 hover:text-blue-300 hover:bg-neutral-700"
                   }`}
                 >
                   <GeminiIcon />
