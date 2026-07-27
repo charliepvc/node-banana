@@ -38,15 +38,21 @@ function getVertexConfig(request: Request): { project: string; location: string 
  * Returns the effective location based on the model.
  */
 function getEffectiveLocation(config: { project: string; location: string }, model: string): { project: string; location: string } {
-  // Preview models only support "global" location on Vertex AI
-  // GA Veo models (veo-3.1-generate-preview, veo-3.1-fast-generate-preview) are regional (us-central1)
+  // Some preview models are ONLY available in the "global" location on Vertex AI.
+  // All other models MUST use a regional location (e.g. us-central1).
+  // If the user has "global" saved in settings but the model isn't in this list,
+  // we force us-central1 to avoid 403 errors.
   const GLOBAL_LOCATION_MODELS = [
     "vertex/nano-banana-pro",             // gemini-3-pro-image
-    // NOTE: nano-banana-2 (gemini-3.1-flash-image) removed from global — try us-central1
   ];
 
-  const effectiveLocation = GLOBAL_LOCATION_MODELS.includes(model) ? "global" : config.location;
-  return { project: config.project, location: effectiveLocation };
+  if (GLOBAL_LOCATION_MODELS.includes(model)) {
+    return { project: config.project, location: "global" };
+  }
+
+  // For all other models, never use "global" — force regional
+  const location = config.location === "global" ? "us-central1" : config.location;
+  return { project: config.project, location };
 }
 
 /**
