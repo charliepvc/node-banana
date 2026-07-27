@@ -252,15 +252,17 @@ export function GenerateImageNode({ id, data, selected }: NodeProps<NanoBananaNo
       updateNodeData(id, { model });
       saveNanoBananaDefaults({ model });
 
-      // Also update selectedModel for consistency
+      // Also update selectedModel for consistency — preserve current provider
+      const isVertex = currentProvider === "vertex";
+      const modelId = isVertex ? `vertex/${model}` : model;
       const newSelectedModel: SelectedModel = {
-        provider: "gemini",
-        modelId: model,
+        provider: currentProvider,
+        modelId,
         displayName: GEMINI_IMAGE_MODELS.find(m => m.value === model)?.label || model,
       };
       updateNodeData(id, { selectedModel: newSelectedModel });
     },
-    [id, updateNodeData]
+    [id, currentProvider, updateNodeData]
   );
 
   const handleGoogleSearchToggle = useCallback(

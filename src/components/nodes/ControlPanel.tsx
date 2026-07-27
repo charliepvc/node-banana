@@ -277,8 +277,8 @@ function GenerateImageControls({ node }: { node: Node }) {
     setIsBrowseDialogOpen(false);
   }, [node.id, updateNodeData]);
 
-  const isGeminiProvider = currentProvider === "gemini";
-  const currentModelId = isGeminiProvider ? (nodeData.selectedModel?.modelId || nodeData.model) : null;
+  const isGeminiProvider = currentProvider === "gemini" || currentProvider === "vertex";
+  const currentModelId = isGeminiProvider ? (nodeData.selectedModel?.modelId?.replace(/^vertex\//, '') || nodeData.model) : null;
   const supportsResolution = currentModelId === "nano-banana-pro" || currentModelId === "nano-banana-2";
   const aspectRatios = currentModelId === "nano-banana-2" ? EXTENDED_ASPECT_RATIOS : BASE_ASPECT_RATIOS;
   const resolutions = currentModelId === "nano-banana-2" ? RESOLUTIONS_NB2 : RESOLUTIONS_PRO;

@@ -43,6 +43,7 @@ function getEffectiveLocation(config: { project: string; location: string }, mod
   const GLOBAL_LOCATION_MODELS = [
     "vertex/nano-banana-pro",             // gemini-3-pro-image
     "vertex/nano-banana-2",               // gemini-3.1-flash-image
+    "vertex/nano-banana-2-lite",          // gemini-3.1-flash-lite-image
   ];
 
   if (GLOBAL_LOCATION_MODELS.includes(model)) {
