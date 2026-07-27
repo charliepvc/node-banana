@@ -619,15 +619,6 @@ const VERTEX_IMAGE_MODELS: ProviderModel[] = [
     coverImage: undefined,
     pricing: { type: "per-run", amount: 0.134, currency: "USD" },
   },
-  {
-    id: "vertex/omni-flash",
-    name: "Omni Flash (Vertex)",
-    description: "Multimodal generation with Gemini Omni Flash via Vertex AI.",
-    provider: "vertex",
-    capabilities: ["text-to-image", "image-to-image"],
-    coverImage: undefined,
-    pricing: { type: "per-run", amount: 0.039, currency: "USD" },
-  },
 ];
 
 const VERTEX_VIDEO_MODELS: ProviderModel[] = [
